@@ -1,0 +1,41 @@
+[project]
+name = "egyptian-civil-code-rag-project"
+version = "0.1.0"
+description = "A Retrieval-Augmented Generation (RAG) system that answers questions about the Egyptian Civil Code for non-commercial educational use."
+readme = "README.md"
+authors = [
+    { name = "nurhanhasan", email = "hasan.nurhan@hotmail.com" }
+]
+requires-python = ">=3.12.13"
+dependencies = [
+    "fastapi>=0.142.2",
+]
+
+[project.scripts]
+egyptian-civil-code-rag-project = "ragapp:main"
+
+[build-system]
+requires = ["uv_build>=0.12.0,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "ragapp"
+
+[dependency-groups]
+dev = [
+    "pre-commit",
+    "ruff",
+]
+
+
+# uv run ruff check .
+# uv run ruff format .
+
+[tool.ruff]
+line-length = 88
+
+# `E`: pycodestyle errors: whitespace/style problems
+# `F`: Pyflakes: undefined variables, unused imports, etc.
+# `I`: isort: import ordering
+[tool.ruff.lint]
+select = ["E", "F", "I"]
