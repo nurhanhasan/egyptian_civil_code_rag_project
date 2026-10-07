@@ -1,0 +1,2 @@
+class BentomlReranker:
+    pass

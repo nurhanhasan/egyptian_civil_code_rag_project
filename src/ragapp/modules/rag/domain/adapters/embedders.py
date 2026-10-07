@@ -1,0 +1,2 @@
+class BentomlEmbedder:
+    pass

@@ -1,0 +1,10 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "killdebugger",
+            "type": "shell",
+            "command": "netstat -nao | grep \"5000\"|awk '{ print $5 }'| xargs kill -9"
+        }
+    ]
+}

@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+        "name": "Python: Current File",
+        "type": "python",
+        "request": "launch",
+        "program": "${file}",
+        "console": "integratedTerminal",
+        "justMyCode": true
+    },
+    {
+      "name": "FastAPI: uvicorn (dev)",
+      "type": "debugpy",
+      "request": "launch",
+      // "module": "uvicorn",
+      "program": "./.venv/bin/uvicorn",
+      "args": [
+        "ragapp.entrypoints.fastapi.main:app",
+        "--reload",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "envFile": "${workspaceFolder}/.env.dev",
+      "jinja": false,
+      "justMyCode": true,
+      "postDebugTask": "killdebugger"
+    }
+  ]
+}
