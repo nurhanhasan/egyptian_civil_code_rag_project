@@ -1,5 +1,6 @@
 [core]
     analytics = false
-    remote = gdrive
-['remote "gdrive"']
-    url = gdrive://1WVFUylzd1XiTAgEq1jYQrznMG2SbTgg9
+    autostage = true
+    remote = ecc-doc-link
+['remote "ecc-doc-link"']
+    url = https://sadanykhalifa.com/uploads/Laws/1576751803.pdf
