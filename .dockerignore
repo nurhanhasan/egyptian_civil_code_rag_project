@@ -1,0 +1,32 @@
+# Keep the build context small and safe.
+# Note: pyproject.toml, uv.lock, README.md and src/ are NOT ignored — the
+# Dockerfile copies them explicitly.
+
+# VCS + editor
+.git
+.gitignore
+.DS_Store
+.vscode
+
+# Local env files — never ship .env* into an image
+.env
+.env.*
+
+# Python junk
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# The dev virtualenv (1.1 GB with torch) — must not leak into the context
+.venv
+
+# Heavy / non-runtime content
+data/
+docs/
+reports/
+monitoring/
+docker/
+tests/
+.mypy_cache/
+*.pdf

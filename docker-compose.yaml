@@ -1,0 +1,53 @@
+name: egyptian-civil-code-rag
+
+services:
+
+  redis:
+    image: redis:${REDIS_VERSION:-7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2}
+    networks:
+      - appnet
+    command: ["redis-server", "--appendonly", "no"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  # ----------------------------------------------------------------
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ${RAG_API_IMAGE:-ecc/backend:dev}
+    networks:
+      - appnet
+    env_file:
+      - .env.dev
+    environment:
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/0}
+      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis:6379/3}
+      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${RAG_PORT:-8000}:8000"
+    healthcheck:
+      # Curl-free probe; python is baked into the backend image.
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+networks:
+  appnet:
+    driver: bridge
+
+volumes:
+  redis-data:
