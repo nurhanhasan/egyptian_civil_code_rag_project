@@ -1,0 +1,113 @@
+{
+  "record_type": "document",
+  "schema_version": "1.0",
+  "doc_id": "egyptian-civil-law-1948",
+  "title": "Egyptian Civil Code (Law No. 131 of 1948)",
+  "title_ar": "القانون المدني المصري (القانون رقم ١٣١ لسنة ١٩٤٨)",
+  "authority": "Arab Republic of Egypt",
+  "jurisdiction": "EG",
+  "doc_status": "in_force",
+  "publication_date": "1948-07-16",
+  "effective_date": "1949-10-15",
+  "language": [
+    "ar",
+    "en"
+  ],
+  "doc_type": "statute",
+  "source_path": "data/corpus/Egyptian_Civil_Law.pdf",
+  "source_checksum": "sha256:2d6419fb262dab712f7bf5f6e31834bea74fbcf03b78ae081dd35d156915eebf",
+  "corpus_revision": "egyptian-civil-law-1948@2d6419fb262d",
+  "page_count": 170,
+  "extraction_config_id": "sha256:ae6c57d9f0bb32f1181c179e58af94b8b65e64b9ae83b56de8f3a44b9596620e",
+  "run_config": {
+    "pipeline_version": "1.0.0",
+    "source_checksum": "sha256:2d6419fb262dab712f7bf5f6e31834bea74fbcf03b78ae081dd35d156915eebf",
+    "extraction": {
+      "tool": "pymupdf",
+      "tool_version": "1.28.2",
+      "table_detection": "page.find_tables() (ruling rectangles)",
+      "line_baseline_tolerance_pt": 2.0,
+      "bidi_repair": [
+        "geometric_rtl_order",
+        "lam_alef_ligature_order",
+        "ltr_run_reversal"
+      ]
+    },
+    "normalization": {
+      "decompose_presentation_forms": true,
+      "strip_tatweel": true,
+      "strip_tashkeel": true,
+      "unify_letters": true,
+      "fold_digits": true,
+      "collapse_whitespace_punct": true
+    },
+    "chunking": {
+      "strategy": "article-aware",
+      "article_aware": {
+        "boundary": "table_row + article marker (Article N | مادة (N))",
+        "max_tokens": null,
+        "tokenizer": null,
+        "split_at": "paragraph/clause boundaries",
+        "packing": false
+      },
+      "fixed_size": null
+    }
+  },
+  "extraction": {
+    "cer": {
+      "status": "unmeasured",
+      "reason": "no --cer-reference-dir given"
+    },
+    "article_detection_rate": {
+      "status": "unmeasured",
+      "reason": "no --article-count-reference given"
+    },
+    "corpus_coverage": {
+      "pages_total": 170,
+      "pages_needs_ocr": [],
+      "pages_indexed": 170,
+      "page_coverage": 1.0,
+      "chars_total": 570429,
+      "chars_in_tables": 569996,
+      "char_coverage_tables": 0.9992
+    },
+    "bidi_repairs": {
+      "lam_alef_swaps": 3500,
+      "ltr_runs_reversed": 1055,
+      "brackets_mirrored": 1937,
+      "overlapping_spaces_dropped": 62
+    },
+    "corpus_gaps": {
+      "pages_needs_ocr": [],
+      "text_outside_tables_not_indexed": [
+        {
+          "page": 1,
+          "chars": 526
+        }
+      ]
+    }
+  },
+  "article_length_distribution": {
+    "status": "unmeasured: tokenizer not available locally; char counts only (ADR-0007 requires the Qwen2.5 token distribution before choosing caps)",
+    "ar": {
+      "chars": {
+        "n": 1092,
+        "min": 41,
+        "p50": 214,
+        "p95": 529,
+        "max": 1427,
+        "mean": 245.0
+      }
+    },
+    "en": {
+      "chars": {
+        "n": 1093,
+        "min": 46,
+        "p50": 337,
+        "p95": 811,
+        "max": 2154,
+        "mean": 379.4
+      }
+    }
+  }
+}

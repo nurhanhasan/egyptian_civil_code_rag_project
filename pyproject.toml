@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.12.13"
 dependencies = [
     "bentoml>=1.4.39",
+    "dvc>=3.67.1",
     "fastapi>=0.142.2",
     "openai>=1.0.0",
     "pydantic>=2.13.5",
@@ -46,6 +47,8 @@ dev = [
 
 [tool.ruff]
 line-length = 88
+# data/ holds one-off corpus scratch scripts, not application code.
+extend-exclude = ["data"]
 
 # `E`: pycodestyle errors: whitespace/style problems
 # `F`: Pyflakes: undefined variables, unused imports, etc.

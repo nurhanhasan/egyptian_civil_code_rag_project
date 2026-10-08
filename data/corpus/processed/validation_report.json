@@ -1,0 +1,92 @@
+{
+  "run_at": "2026-10-07T13:06:16+00:00",
+  "extraction_config_id": "sha256:ae6c57d9f0bb32f1181c179e58af94b8b65e64b9ae83b56de8f3a44b9596620e",
+  "summary": {
+    "blocks_round_tripped": 2878,
+    "articles_detected": 1095,
+    "article_numbers_covered": 1149,
+    "expected_last_article": 1149,
+    "article_detection_rate_vs_sequence": 1.0,
+    "missing_articles": [],
+    "bidi_reversed_chunks": 1,
+    "four_digit_years": {
+      "plausible": 4,
+      "reversed": 4
+    },
+    "corpus_coverage": {
+      "pages_total": 170,
+      "pages_needs_ocr": [],
+      "pages_indexed": 170,
+      "page_coverage": 1.0,
+      "chars_total": 570429,
+      "chars_in_tables": 569996,
+      "char_coverage_tables": 0.9992
+    }
+  },
+  "error_count": 3,
+  "warning_count": 8,
+  "error_codes": {
+    "ar_visual_order_suspected": 1,
+    "missing_language_text": 1,
+    "digit_order_suspected": 1
+  },
+  "warning_codes": {
+    "article_marker_one_column_only": 1,
+    "chunk_without_section": 6,
+    "text_outside_tables_not_indexed": 1
+  },
+  "errors": [
+    {
+      "code": "ar_visual_order_suspected",
+      "chunk_id": "egyptian-civil-law-1948:article:4:part:1"
+    },
+    {
+      "code": "missing_language_text",
+      "chunk_id": "egyptian-civil-law-1948:article:1022:part:1",
+      "lang": "ar"
+    },
+    {
+      "code": "digit_order_suspected",
+      "ok": 4,
+      "reversed": 4
+    }
+  ],
+  "warnings": [
+    {
+      "code": "article_marker_one_column_only",
+      "page": 147,
+      "article": "1022",
+      "missing": "ar"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:199:part:1"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:200:part:1"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:201:part:1"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:202:part:1"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:389-417:part:1"
+    },
+    {
+      "code": "chunk_without_section",
+      "chunk_id": "egyptian-civil-law-1948:article:1030:part:1"
+    },
+    {
+      "code": "text_outside_tables_not_indexed",
+      "page": 1,
+      "chars": 526,
+      "preview": "القانون المدني المصري\nقانون الإصدار\nمادة ١\nيلغي القانون المد"
+    }
+  ]
+}
