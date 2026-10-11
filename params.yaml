@@ -1,0 +1,40 @@
+# Data pipeline parameters
+
+# Input / output
+pdf: "data/corpus/Egyptian_Civil_Law.pdf"
+out_dir: "data/corpus/processed"
+
+# Chunking strategy: article-aware | fixed-size | both
+strategy: "article-aware"
+
+# Article-aware token cap (None = no in-article split)
+max_tokens: null
+tokenizer: "Qwen/Qwen2.5-7B-Instruct"
+
+# Fixed-size window (used if strategy includes fixed-size)
+fixed_size_chars: 1200
+fixed_overlap_chars: 200
+
+# Embedding-side checks
+embedding_tokenizer: "BAAI/bge-m3"
+embedding_max_seq: 8192
+
+# Validation references
+expected_last_article: 1149
+cer_reference_dir: null
+article_count_reference: null
+
+# Normalization toggles (true = disable that rule)
+no_decompose_presentation_forms: false
+no_strip_tatweel: false
+no_strip_tashkeel: false
+no_unify_letters: false
+no_fold_digits: false
+no_collapse_whitespace_punct: false
+
+# Exit behavior
+allow_errors: false
+
+# Qdrant (for optional index stage - set via env in CI)
+QDRANT_URL: "http://localhost:6333"
+QDRANT_COLLECTION_ALIAS: "egyptian-civil-code"

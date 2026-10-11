@@ -1,0 +1,27 @@
+stages:
+  extract-and-chunk:
+    cmd: >-
+      uv run python data/corpus/extract_civil_code.py
+      --pdf "${pdf}"
+      --out-dir "${out_dir}"
+      --strategy "${strategy}"
+    deps:
+      - data/corpus/Egyptian_Civil_Law.pdf
+      - data/corpus/extract_civil_code.py
+    params:
+      - pdf
+      - out_dir
+      - strategy
+    outs:
+      - data/corpus/processed/document.json:
+          cache: true
+      - data/corpus/processed/pages.jsonl:
+          cache: true
+      - data/corpus/processed/chunks.article_aware.jsonl:
+          cache: true
+      # - data/corpus/processed/chunks.fixed_size.jsonl:
+      #     cache: true
+      - data/corpus/processed/source_to_chunk.jsonl:
+          cache: true
+      - data/corpus/processed/validation_report.json:
+          cache: true

@@ -72,9 +72,9 @@ jobs:
           docker buildx build \
             --cache-from type=gha \
             --cache-to type=gha,mode=max \
-            --build-arg WORKERS=4 \
+            --build-arg WORKERS=1 \
             --push \
             -f docker/Dockerfile \
-            -t nurhanhasan/backend:sha-${GITHUB_SHA::12} \
-            -t nurhanhasan/backend:latest \
+            -t nurhanhasan/ecc-rag/backend:sha-${GITHUB_SHA::12} \
+            -t nurhanhasan/ecc-rag/backend:latest \
             .

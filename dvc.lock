@@ -1,0 +1,41 @@
+schema: '2.0'
+stages:
+  extract-and-chunk:
+    cmd: uv run python data/corpus/extract_civil_code.py --pdf 
+      "data/corpus/Egyptian_Civil_Law.pdf" --out-dir "data/corpus/processed" 
+      --strategy "article-aware"
+    deps:
+    - path: data/corpus/Egyptian_Civil_Law.pdf
+      hash: md5
+      md5: 5086ef5f16f15d856278db943e58e948
+      size: 2599703
+    - path: data/corpus/extract_civil_code.py
+      hash: md5
+      md5: b3e4344da8b1cdab74e3f7996707896f
+      size: 68757
+    params:
+      params.yaml:
+        out_dir: data/corpus/processed
+        pdf: data/corpus/Egyptian_Civil_Law.pdf
+        strategy: article-aware
+    outs:
+    - path: data/corpus/processed/chunks.article_aware.jsonl
+      hash: md5
+      md5: f17abdd912b9b47ba4271e7fdd4f75c0
+      size: 3495886
+    - path: data/corpus/processed/document.json
+      hash: md5
+      md5: ba482d5ddf720b6eaad4fb01c7971f24
+      size: 3503
+    - path: data/corpus/processed/pages.jsonl
+      hash: md5
+      md5: 46355e11ea9f6407249648a4c52c56ba
+      size: 2578366
+    - path: data/corpus/processed/source_to_chunk.jsonl
+      hash: md5
+      md5: 68b8ce3638f3b2c44c704752da6e92a1
+      size: 576298
+    - path: data/corpus/processed/validation_report.json
+      hash: md5
+      md5: e3071573527f4e147b70a367c0ecfa5e
+      size: 2186

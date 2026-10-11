@@ -1,4 +1,5 @@
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
@@ -11,7 +12,17 @@ from ragapp.exceptions.handlers import register_exception_handlers
 from ragapp.middleware.cors import setup_cors
 from ragapp.middleware.logging import LoggingMiddleware
 from ragapp.modules.health.router import router as health_router
+from ragapp.modules.rag.factories import (
+    get_embedder,
+    get_generator,
+    get_reranker,
+    get_retriever,
+)
 from ragapp.modules.rag.router import router as rag_router
+from ragapp.modules.rag.service import RAGPipelineService
+
+# Debug: force stdout flush
+logging.basicConfig(level=logging.DEBUG, stream=sys.stdout, force=True)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -25,10 +36,32 @@ async def lifespan(app: FastAPI):
 
     # Startup logging
     logger.info("Starting up RAG API...")
+    logger.info(
+        f"Settings: GENERATOR_BACKEND={settings.GENERATOR_BACKEND}, "
+        f"EMBEDDER_BACKEND={settings.EMBEDDER_BACKEND}, "
+        f"RERANKER_BACKEND={settings.RERANKER_BACKEND}, "
+        f"RETRIEVER_BACKEND={settings.RETRIEVER_BACKEND}"
+    )
 
     # Initialize cache
     cache_manager = get_cache()
     await cache_manager.init()
+
+    # Load models once at the application starts
+    logger.info("Pre-warming RAG pipeline...")
+
+    generator = get_generator(settings)
+    embedder = get_embedder(settings)
+    retriever = get_retriever(settings)
+    reranker = get_reranker(settings)
+
+    app.state.rag_service = RAGPipelineService(
+        generator=generator,
+        embedder=embedder,
+        retriever=retriever,
+        reranker=reranker,
+        system_prompt=settings.GENERATOR_SYSTEM_PROMPT,
+    )
 
     # Start app
     yield
@@ -36,13 +69,14 @@ async def lifespan(app: FastAPI):
     # Shutdown logging
     logger.info("Shutting down RAG API...")
 
+    # Runs when the application shuts down
+    del app.state.rag_service
+
     # Close cache
     await cache_manager.close()
 
 
 def create_app() -> FastAPI:
-
-    print(f"Environment: {settings.ENVIRONMENT}")
 
     # Instantiate FastAPI app
     app = FastAPI(

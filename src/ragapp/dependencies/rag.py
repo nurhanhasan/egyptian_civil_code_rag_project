@@ -15,23 +15,28 @@ from ragapp.modules.rag.factories import (
 from ragapp.modules.rag.service import RAGPipelineService
 
 
-def get_generator_dep(settings: Settings) -> Generator:
+def get_generator_dep(settings: Settings = Depends(get_settings)) -> Generator:
     return get_generator(settings)
 
 
-def get_embedder_dep(settings: Settings) -> Embedder:
+def get_embedder_dep(settings: Settings = Depends(get_settings)) -> Embedder:
     return get_embedder(settings)
 
 
-def get_retriever_dep(settings: Settings) -> Retriever:
+def get_retriever_dep(settings: Settings = Depends(get_settings)) -> Retriever:
     return get_retriever(settings)
 
 
-def get_reranker_dep(settings: Settings) -> Reranker:
+def get_reranker_dep(settings: Settings = Depends(get_settings)) -> Reranker:
     return get_reranker(settings)
 
 
 def get_rag_pipeline_service(
+    # uses Depends for each component (enables test overrides)
+    generator: Generator = Depends(get_generator_dep),
+    embedder: Embedder = Depends(get_embedder_dep),
+    retriever: Retriever = Depends(get_retriever_dep),
+    reranker: Reranker = Depends(get_reranker_dep),
     settings: Settings = Depends(get_settings),
 ) -> RAGPipelineService:
     """
@@ -50,9 +55,9 @@ def get_rag_pipeline_service(
          this is the seam BentoML designed for
     """
     return RAGPipelineService(
-        generator=get_generator_dep(settings),
-        embedder=get_embedder_dep(settings),
-        retriever=get_retriever_dep(settings),
-        reranker=get_reranker_dep(settings),
+        generator=generator,
+        embedder=embedder,
+        retriever=retriever,
+        reranker=reranker,
         system_prompt=settings.GENERATOR_SYSTEM_PROMPT,
     )

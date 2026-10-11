@@ -220,3 +220,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Output of dvc extract and chunk pipeline
+data/corpus/processed/
+
+# Qdrant (external vector store)
+qdrant_storage/
+
+mlflow.db

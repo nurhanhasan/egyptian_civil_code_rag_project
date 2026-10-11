@@ -26,7 +26,6 @@ data/
 docs/
 reports/
 monitoring/
-docker/
 tests/
 .mypy_cache/
 *.pdf

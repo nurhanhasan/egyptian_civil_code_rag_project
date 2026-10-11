@@ -70,11 +70,13 @@ class Settings(BaseSettings):
     #                       vLLM in prod (Qwen2.5-7B-AWQ), Ollama in dev,
     #                       TGI / llama.cpp / Azure — only the base_url+model
 
-    GENERATOR_BACKEND: str = "fake"
+    GENERATOR_BACKEND: str = "openai"
     GENERATOR_SYSTEM_PROMPT: str = (
         "You are a careful assistant that answers questions about the Egyptian "
         "Civil Code. Answer only from the context provided. If the context does "
         "not contain the answer, say so explicitly instead of guessing."
+        "When the user asks in Arabic, always answer in Arabic."
+        "Only if the user asks in English, answer in English."
     )
     OPENAI_BASE_URL: str | None = None
     OPENAI_API_KEY: str | None = None
@@ -82,6 +84,25 @@ class Settings(BaseSettings):
     GENERATOR_TEMPERATURE: float = 0.0
     GENERATOR_MAX_TOKENS: int = 1000
     GENERATOR_TIMEOUT: float = 120.0
+
+    ### Embedder ###
+    EMBEDDER_BACKEND: str = "bge"
+    # Model paths for local cached models
+    BGE_M3_MODEL_PATH: str = "BAAI/bge-m3"
+    EMBEDDER_MODEL_REVISION_ID: str = "5617a9f61b028005a4858fdac845db406aefb181"
+
+    ### Reranker ###
+    RERANKER_BACKEND: str = "bge"
+    # Model paths for local cached models
+    BGE_RERANKER_MODEL_PATH: str = "BAAI/bge-reranker-v2-m3"
+    RERANKER_MODEL_REVISION_ID: str = "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+
+    # Retriever — Qdrant. URIs + the stable alias live in the
+    # environment tier; top_k / RRF-k belong to the params.yaml tier.
+    RETRIEVER_BACKEND: str = "qdrant"
+    QDRANT_URL: str = "http://localhost:6333"
+    QDRANT_COLLECTION_ALIAS: str = "egyptian-civil-code"
+    QDRANT_TIMEOUT: float = 5.0
 
     # Rate limiting
     RATE_LIMIT_ENABLED: bool = False

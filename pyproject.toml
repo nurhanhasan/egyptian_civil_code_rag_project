@@ -11,14 +11,15 @@ dependencies = [
     "bentoml>=1.4.39",
     "dvc>=3.67.1",
     "fastapi>=0.142.2",
+    "flagembedding>=1.4.2",
     "openai>=1.0.0",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "pymupdf>=1.28.2",
     "pymupdf4llm>=1.28.2",
+    "qdrant-client>=1.19.1",
     "redis>=8.1.0",
-    "torch>=2.14.1",
-    "transformers<5",
+    "sentence-transformers>=6.1.0",
     "uvicorn>=0.54.0",
 ]
 
@@ -34,7 +35,9 @@ module-name = "ragapp"
 
 [dependency-groups]
 dev = [
+    "dvc>=3.67.1",
     "httpx>=0.28.1",
+    "mlflow>=3.17.0",
     "pre-commit",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

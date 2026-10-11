@@ -27,7 +27,7 @@ class _FakeGenerator:
         self._canned = canned
         self.closed = False
 
-    def generate(self, question: str) -> str:
+    def generate(self, question: list[dict[str, str]]) -> str:
         if self._canned is not None:
             return self._canned
         last_user = next(

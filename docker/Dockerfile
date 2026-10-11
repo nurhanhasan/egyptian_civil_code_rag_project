@@ -33,7 +33,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM ${PYTHON_IMAGE} AS runtime
 
-ARG WORKERS=4
+ARG WORKERS=1
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -51,9 +51,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Application source + migration tree.
 COPY --chown=app:app pyproject.toml uv.lock ./
-COPY --chown=app:app src/ /app/
+COPY --chown=app:app src/ /app/src/
 # COPY --chown=app:app ./migrations    ./migrations
 # COPY --chown=app:app alembic.ini     ./
+
+ENV PYTHONPATH=/app/src
 
 USER app
 
@@ -65,4 +67,4 @@ STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
 
-CMD ["sh", "-c", "exec uvicorn ragapp.entrypoints.fastapi.main:create_app --host 0.0.0.0 --port 8000 --workers ${WORKERS}"]
+CMD ["sh", "-c", "exec uvicorn ragapp.entrypoints.fastapi.main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS}"]

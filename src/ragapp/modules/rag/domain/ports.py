@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-import dataclass
+from ragapp.modules.rag.domain.entities import EmbeddingResult, ScoredChunk
 
 
 @runtime_checkable
@@ -39,22 +39,12 @@ class Generator(Protocol):
         ...
 
 
-@dataclass
-class EmbeddingResult:
-    pass
-
-
 @runtime_checkable
 class Embedder(Protocol):
     """Hybrid by default — returns dense AND sparse + revision_id."""
 
     async def embed(self, texts: list[str]) -> EmbeddingResult: ...
     def close(self) -> None: ...
-
-
-@dataclass
-class ScoredChunk:
-    pass
 
 
 @runtime_checkable
@@ -69,6 +59,7 @@ class Retriever(Protocol):
         jurisdiction: str,  # REQUIRED - not optional
         doc_status: str,  # REQUIRED - not optional
     ) -> list[ScoredChunk]: ...
+
     def close(self) -> None: ...
 
 
@@ -77,6 +68,6 @@ class Reranker(Protocol):
     """Identity is a real Pareto arm."""
 
     async def rerank(
-        self, query: str, candidates: list[ScoredChunk]
+        self, question: str, candidates: list[ScoredChunk]
     ) -> list[ScoredChunk]: ...
     def close(self) -> None: ...
