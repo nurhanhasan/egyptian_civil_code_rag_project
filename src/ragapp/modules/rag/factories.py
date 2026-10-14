@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_BACKENDS = ("fake", "openai")
 
 
-@lru_cache(maxsize=8)
+@lru_cache(maxsize=1)
 def _get_generator_cached(
     backend: str,
     openai_base_url: str | None,
@@ -96,19 +96,29 @@ def reset_generator_cache() -> None:
     _get_generator_cached.cache_clear()
 
 
-def get_embedder(settings: Settings) -> Embedder:
-    backend = (settings.EMBEDDER_BACKEND or "fake").strip().lower()
+@lru_cache(maxsize=1)
+def _get_embedder_cached(backend: str, device: str | None) -> Embedder:
 
-    logger.info(f"Creating embedder: backend={backend}")
+    logger.info(f"Creating embedder: backend={backend}, device={device}")
+
     if backend == "fake":
         logger.info("Using _FakeEmbedder")
         return _FakeEmbedder()
 
     logger.info("Using BentoMLBGEEmbedder")
-    return BentoMLBGEEmbedder()
+    # `.inner` is BentoML's raw class — the seam for injecting constructor args;
+    # the @service() wrapper's zero-arg call stays available for the runtime.
+    return BentoMLBGEEmbedder.inner(device=device)
 
 
-def get_retriever(settings: Settings) -> Retriever:
+def get_embedder(settings: Settings) -> Embedder:
+    return _get_embedder_cached(settings.EMBEDDER_BACKEND, settings.BGE_DEVICE)
+
+
+@lru_cache(maxsize=1)
+def _get_retriever_cached(
+    backend: str, collection_alias: str, url: str | None, timeout: int | None
+) -> Retriever:
     """
     Build the configured Retriever.
 
@@ -119,32 +129,44 @@ def get_retriever(settings: Settings) -> Retriever:
     QDRANT_URL=":memory:" selects Qdrant's in-process local store —
     hermetic, GPU/docker-free CI and local dev.
     """
-    backend = (settings.RETRIEVER_BACKEND or "qdrant").strip().lower()
 
-    logger.info(f"Creating retriever: backend={backend}, url={settings.QDRANT_URL}")
+    logger.info(
+        f"Creating retriever: backend={backend}, url={url}, alias={collection_alias}"
+    )
+
     if backend == "qdrant":
-        url = settings.QDRANT_URL
+        url = url
         if url == ":memory:":
             client = QdrantClient(":memory:")
         else:
-            client = QdrantClient(url=url, timeout=settings.QDRANT_TIMEOUT)
-        logger.info(
-            "Retriever: backend=qdrant alias=%s", settings.QDRANT_COLLECTION_ALIAS
-        )
-        return QdrantRetriever(
-            client=client, collection_alias=settings.QDRANT_COLLECTION_ALIAS
-        )
+            client = QdrantClient(url=url, timeout=timeout)
+
+        return QdrantRetriever(client=client, collection_alias=collection_alias)
 
     raise ValueError(f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant")
 
 
-def get_reranker(settings: Settings) -> Reranker:
-    backend = (settings.RERANKER_BACKEND or "fake").strip().lower()
+def get_retriever(settings: Settings) -> Retriever:
+    return _get_retriever_cached(
+        backend=settings.RETRIEVER_BACKEND,
+        url=settings.QDRANT_URL,
+        collection_alias=settings.QDRANT_COLLECTION_ALIAS,
+        timeout=settings.QDRANT_TIMEOUT,
+    )
 
-    logger.info(f"Creating reranker: backend={backend}")
+
+@lru_cache(maxsize=1)
+def _get_reranker_cached(backend: str, device: str | None) -> Reranker:
+
+    logger.info(f"Creating reranker: backend={backend}, device={device}")
+
     if backend == "fake":
         logger.info("Using _FakeReranker")
         return _FakeReranker()
 
     logger.info("Using BentoMLBGEReranker")
-    return BentoMLBGEReranker()
+    return BentoMLBGEReranker.inner(device=device)
+
+
+def get_reranker(settings: Settings) -> Reranker:
+    return _get_reranker_cached(settings.RERANKER_BACKEND, settings.BGE_DEVICE)

@@ -67,4 +67,4 @@ STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
 
-CMD ["sh", "-c", "exec uvicorn ragapp.entrypoints.fastapi.main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS}"]
+CMD ["sh", "-c", "exec uvicorn ragapp.entrypoints.fastapi.main:app --host 0.0.0.0 --port 8000 --workers ${WORKERS} --no-access-log"]

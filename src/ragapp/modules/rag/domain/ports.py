@@ -20,7 +20,7 @@ from ragapp.modules.rag.domain.entities import EmbeddingResult, ScoredChunk
 class Generator(Protocol):
     """LLM Generator interface"""
 
-    def generate(self, question: list[dict[str, str]]) -> str:
+    async def generate(self, question: list[dict[str, str]]) -> str:
         """
         Run the model over `question` and return the completion text.
 
@@ -33,7 +33,7 @@ class Generator(Protocol):
         """
         ...
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release any underlying client/session. Idempotent; a no-op if there is
         nothing to release (the fake)."""
         ...
@@ -44,7 +44,7 @@ class Embedder(Protocol):
     """Hybrid by default — returns dense AND sparse + revision_id."""
 
     async def embed(self, texts: list[str]) -> EmbeddingResult: ...
-    def close(self) -> None: ...
+    async def close(self) -> None: ...
 
 
 @runtime_checkable
@@ -60,7 +60,7 @@ class Retriever(Protocol):
         doc_status: str,  # REQUIRED - not optional
     ) -> list[ScoredChunk]: ...
 
-    def close(self) -> None: ...
+    async def close(self) -> None: ...
 
 
 @runtime_checkable
@@ -70,4 +70,4 @@ class Reranker(Protocol):
     async def rerank(
         self, question: str, candidates: list[ScoredChunk]
     ) -> list[ScoredChunk]: ...
-    def close(self) -> None: ...
+    async def close(self) -> None: ...

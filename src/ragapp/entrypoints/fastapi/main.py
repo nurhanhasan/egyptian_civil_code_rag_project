@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down RAG API...")
 
     # Runs when the application shuts down
-    del app.state.rag_service
+    await app.state.rag_service.close()
 
     # Close cache
     await cache_manager.close()

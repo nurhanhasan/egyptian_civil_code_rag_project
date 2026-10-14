@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import JSONResponse
 
-from ragapp.dependencies.rag import get_rag_pipeline_service
+from ragapp.modules.rag.dependency.rag import get_rag_pipeline_service
 from ragapp.modules.rag.schema import AbstentionResponse, AskRequest, AskResponse
 from ragapp.modules.rag.service import RAGPipelineService
 

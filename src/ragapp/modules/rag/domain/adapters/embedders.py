@@ -24,7 +24,7 @@ class _FakeEmbedder:
         sparse = [{100 + i: 1.0, 1000: 0.2} for i in range(len(texts))]
         return EmbeddingResult(dense=dense, sparse=sparse, revision_id=self.revision_id)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         pass
 
 
@@ -36,9 +36,12 @@ class BentoMLBGEEmbedder:
 
     # model_path = HuggingFaceModel(MODEL_ID)
 
-    def __init__(self):
+    def __init__(self, device: str | None = None):
+        # @bentoml.service() wraps the class: zero-arg `Service()` yields a
+        # default instance for the BentoML runtime path, while `Service.inner`
+        # is the raw class the factory uses to inject config (e.g. device).
         self.model_path = os.getenv("BGE_M3_MODEL_PATH", EMBEDDER_MODEL_ID)
-        self.model = BGEM3FlagModel(self.model_path, use_fp16=True)
+        self.model = BGEM3FlagModel(self.model_path, use_fp16=True, devices=device)
         self.revision_id = os.getenv(
             "EMBEDDER_MODEL_REVISION_ID", EMBEDDER_MODEL_REVISION_ID
         )
@@ -62,5 +65,5 @@ class BentoMLBGEEmbedder:
         )
         return self._to_embedding_result(raw, self.revision_id)
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.model = None

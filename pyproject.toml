@@ -21,6 +21,8 @@ dependencies = [
     "redis>=8.1.0",
     "sentence-transformers>=6.1.0",
     "uvicorn>=0.54.0",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
@@ -37,7 +39,8 @@ module-name = "ragapp"
 dev = [
     "dvc>=3.67.1",
     "httpx>=0.28.1",
-    "mlflow>=3.17.0",
+    "locust>=2.32.0",
+    "mlflow>=3.17.1",
     "pre-commit",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",

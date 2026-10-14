@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from ragapp.modules.rag.domain.entities import ScoredChunk
 from ragapp.modules.rag.domain.ports import Embedder, Generator, Reranker, Retriever
@@ -138,7 +139,12 @@ class RAGPipelineService:
         context = self._build_context(reranked)
         messages = self._build_messages(question, context)
 
-        answer = self._generator.generate(messages)
+        # calculate elapsed time inside GENERATOR
+        start_time = time.time()
+        logger.info("Request sent to GENERATOR")
+        answer = await self._generator.generate(messages)
+        elapsed_time = time.time() - start_time
+        logger.info(f"Request duration inside GENERATOR: {elapsed_time:.3f} seconds")
 
         # Post-generation abstention checks
         should_abstain, reason = self._check_abstention(reranked, answer)
@@ -149,3 +155,9 @@ class RAGPipelineService:
         citations = self._build_citations(reranked)
 
         return AskResponse(answer=answer, sources=citations)
+
+    async def close(self) -> None:
+        await self._generator.close()
+        await self._embedder.close()
+        await self._retriever.close()
+        await self._reranker.close()

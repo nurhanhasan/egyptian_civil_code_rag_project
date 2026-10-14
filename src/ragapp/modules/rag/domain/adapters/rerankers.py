@@ -2,7 +2,7 @@ import asyncio
 import os
 
 import bentoml
-from FlagEmbedding import FlagLLMReranker
+from FlagEmbedding import FlagReranker
 
 from ragapp.modules.rag.domain.entities import ScoredChunk
 
@@ -23,7 +23,7 @@ class _FakeReranker:
             for i, c in enumerate(candidates)
         ]
 
-    def close(self) -> None:
+    async def close(self) -> None:
         pass
 
 
@@ -31,11 +31,12 @@ class _FakeReranker:
 class BentoMLBGEReranker:
     """Reranker implementation using BGE reranker via BentoML."""
 
-    def __init__(self):
-        # @bentoml.service() services are instantiated by BentoML runtime,
-        # not your factory. BentoML calls __init__() with no args.
+    def __init__(self, device: str | None = None):
+        # @bentoml.service() wraps the class: zero-arg `Service()` yields a
+        # default instance for the BentoML runtime path, while `Service.inner`
+        # is the raw class the factory uses to inject config (e.g. device).
         self.model_path = os.getenv("BGE_RERANKER_MODEL_PATH", RERANKER_MODEL_ID)
-        self.model = FlagLLMReranker(self.model_path, use_fp16=True)
+        self.model = FlagReranker(self.model_path, use_fp16=True, devices=device)
         self.revision_id = os.getenv(
             "RERANKER_MODEL_REVISION_ID", RERANKER_MODEL_REVISION_ID
         )
@@ -65,5 +66,5 @@ class BentoMLBGEReranker:
             for i, candidate in enumerate(candidates)
         ]
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.model = None

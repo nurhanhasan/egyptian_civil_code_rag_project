@@ -287,7 +287,7 @@ class QdrantRetriever:
             for rank, point in enumerate(response.points)
         ]
 
-    def close(self) -> None:
+    async def close(self) -> None:
         """Release the client. Idempotent."""
         if self._closed:
             return
@@ -356,5 +356,5 @@ class _FakeRetriever:
             for i, chunk in enumerate(self._chunks[:top_k])
         ]
 
-    def close(self) -> None:
+    async def close(self) -> None:
         pass

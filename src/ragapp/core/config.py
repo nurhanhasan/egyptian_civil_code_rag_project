@@ -1,7 +1,9 @@
 import os
 from functools import lru_cache
-from typing import List
+from pathlib import Path
+from typing import Any, List
 
+import yaml
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -85,6 +87,11 @@ class Settings(BaseSettings):
     GENERATOR_MAX_TOKENS: int = 1000
     GENERATOR_TIMEOUT: float = 120.0
 
+    ### BGE Device
+    # None = auto (CUDA > MPS > CPU). Set "cpu" to force CPU, e.g. macOS local
+    # dev where concurrent MPS access trips a Metal assertion.
+    BGE_DEVICE: str | None = None
+
     ### Embedder ###
     EMBEDDER_BACKEND: str = "bge"
     # Model paths for local cached models
@@ -102,7 +109,7 @@ class Settings(BaseSettings):
     RETRIEVER_BACKEND: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
     QDRANT_COLLECTION_ALIAS: str = "egyptian-civil-code"
-    QDRANT_TIMEOUT: float = 5.0
+    QDRANT_TIMEOUT: int = 5
 
     # Rate limiting
     RATE_LIMIT_ENABLED: bool = False
@@ -111,6 +118,83 @@ class Settings(BaseSettings):
     RATE_LIMIT_REFILL_PERIOD: int = 60
     # Bucket TTL so idle keys don't pile up in Redis (>= 2 x REFILL_PERIOD).
     RATE_LIMIT_BUCKET_TTL: int = 120
+
+    # MLflow
+    MLFLOW_TRACKING_URI: str | None = None
+    MLFLOW_EXPERIMENT_NAME: str = "egyptian-civil-code-rag"
+
+    # params.yaml path
+    PARAMS_YAML_PATH: str = "params.yaml"
+
+    def load_params(self) -> dict[str, Any]:
+        """Load params.yaml and merge with settings for Evaluator.
+
+        Returns flat dict with all 7 categories:
+        chunking, embedding, retrieval, reranking, generation, corpus/index, evaluation.
+        """
+        params_path = Path(self.PARAMS_YAML_PATH)
+        yaml_params: dict[str, Any] = {}
+        if params_path.exists():
+            with params_path.open("r", encoding="utf-8") as f:
+                yaml_params = yaml.safe_load(f) or {}
+
+        # Normalization toggles from params.yaml
+        normalization_toggles = {
+            "no_decompose_presentation_forms": yaml_params.get(
+                "no_decompose_presentation_forms", False
+            ),
+            "no_strip_tatweel": yaml_params.get("no_strip_tatweel", False),
+            "no_strip_tashkeel": yaml_params.get("no_strip_tashkeel", False),
+            "no_unify_letters": yaml_params.get("no_unify_letters", False),
+            "no_fold_digits": yaml_params.get("no_fold_digits", False),
+            "no_collapse_whitespace_punct": yaml_params.get(
+                "no_collapse_whitespace_punct", False
+            ),
+        }
+
+        # Determine tracking URI with sqlite fallback
+        tracking_uri = self.MLFLOW_TRACKING_URI or "sqlite:///mlflow.db"
+
+        return {
+            # Chunking
+            "chunking_strategy": yaml_params.get("strategy", "article-aware"),
+            "chunk_size": yaml_params.get("fixed_size_chars", 1200),
+            "chunk_overlap": yaml_params.get("fixed_overlap_chars", 200),
+            "normalization_toggles": normalization_toggles,
+            # Embedding
+            "embedder_backend": self.EMBEDDER_BACKEND,
+            "embedder_model_id": self.BGE_M3_MODEL_PATH,
+            "embedder_revision_id": self.EMBEDDER_MODEL_REVISION_ID,
+            # Retrieval
+            "retriever_backend": self.RETRIEVER_BACKEND,
+            "top_k": 5,  # hardcoded in service.py for now
+            "rrf_k": 60,  # default RRF k
+            "retrieval_mode": "hybrid",
+            "jurisdiction": "EG",
+            "doc_status": "in_force",
+            # Reranking
+            "reranker_backend": self.RERANKER_BACKEND,
+            "reranker_model_id": self.BGE_RERANKER_MODEL_PATH,
+            "reranker_revision_id": self.RERANKER_MODEL_REVISION_ID,
+            # Generation
+            "generator_backend": self.GENERATOR_BACKEND,
+            "generator_model": self.GENERATOR_MODEL,
+            "generator_revision": "",
+            "temperature": self.GENERATOR_TEMPERATURE,
+            "max_tokens": self.GENERATOR_MAX_TOKENS,
+            "system_prompt_hash": str(hash(self.GENERATOR_SYSTEM_PROMPT)),
+            # Corpus/Index
+            "corpus_revision": "",  # filled at ingestion time (DVC hash)
+            "index_build_id": "",  # filled at ingestion time (Qdrant alias target)
+            # Evaluation
+            "judge_model": "",
+            "judge_version": "",
+            "gold_set_version": "",
+            "eval_tier": 1,
+            # MLflow
+            "mlflow_tracking_uri": tracking_uri,
+            "mlflow_experiment_name": self.MLFLOW_EXPERIMENT_NAME,
+        }
 
 
 @lru_cache(maxsize=1)

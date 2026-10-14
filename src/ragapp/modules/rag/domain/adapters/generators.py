@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-import openai as _openai
+from openai import AsyncOpenAI as _Aopenai
 
 from ragapp.exceptions.domain import GeneratorError
 
@@ -27,7 +27,7 @@ class _FakeGenerator:
         self._canned = canned
         self.closed = False
 
-    def generate(self, question: list[dict[str, str]]) -> str:
+    async def generate(self, question: list[dict[str, str]]) -> str:
         if self._canned is not None:
             return self._canned
         last_user = next(
@@ -36,7 +36,7 @@ class _FakeGenerator:
         )
         return f"[fake-generator] {last_user}"
 
-    def close(self) -> None:
+    async def close(self) -> None:
         self.closed = True
 
 
@@ -57,13 +57,13 @@ class _OpenAIBackend:
         self._model = model
         self._temperature = float(temperature)
         self._max_tokens = max_tokens
-        self._client = _openai.OpenAI(
+        self._client = _Aopenai(
             base_url=base_url,
             api_key=api_key or "EMPTY",
             timeout=timeout,
         )
 
-    def generate(self, question: list[dict[str, str]]) -> str:
+    async def generate(self, question: list[dict[str, str]]) -> str:
         kwargs: dict = {
             "model": self._model,
             "messages": question,
@@ -74,7 +74,7 @@ class _OpenAIBackend:
             kwargs["max_tokens"] = self._max_tokens
 
         try:
-            resp = self._client.chat.completions.create(**kwargs)
+            resp = await self._client.chat.completions.create(**kwargs)
         except Exception as e:
             logger.warning(
                 "generator_upstream_error",
@@ -95,8 +95,8 @@ class _OpenAIBackend:
             )
         return resp.choices[0].message.content or ""
 
-    def close(self) -> None:
+    async def close(self) -> None:
         try:
-            self._client.close()
+            await self._client.close()
         except Exception:  # noqa: BLE001
             pass
