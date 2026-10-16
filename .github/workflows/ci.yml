@@ -75,6 +75,6 @@ jobs:
             --build-arg WORKERS=1 \
             --push \
             -f docker/Dockerfile \
-            -t nurhanhasan/ecc-rag/backend:sha-${GITHUB_SHA::12} \
-            -t nurhanhasan/ecc-rag/backend:latest \
+            -t nurhanhasan/ecc-rag-api:sha-${GITHUB_SHA::12} \
+            -t nurhanhasan/ecc-rag-api:latest \
             .
