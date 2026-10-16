@@ -2,7 +2,9 @@
 
 - [Egyptian Civil Code RAG](#egyptian-civil-code-rag)
   - [Run Q\&A in 3 commands](#run-qa-in-3-commands)
+  - [Run without Docker (development)](#run-without-docker-development)
   - [Endpoints](#endpoints)
+  - [Models and revisions](#models-and-revisions)
   - [Project layout](#project-layout)
   - [Compose Profiles](#compose-profiles)
   - [Quality gates](#quality-gates)
@@ -20,33 +22,60 @@ safety controls.
 
 ## Run Q&A in 3 commands
 
-**Before you start (one-time):** create the environment file and point the generator
-at an OpenAI-compatible endpoint (see [Generator](#generator) below).
+  ```bash
+  # 1. Clone
+  git clone https://github.com/nurhanhasan/egyptian_civil_code_rag_project && cd egyptian_civil_code_rag_project && cp .env.example .env.dev # edit, if needed.
 
-```bash
-cp .env.example .env.dev
-```
+  # 2. Start CPU profile. For GPU, pick the `gpu` one.
+  docker-compose --profile cpu up --build -d
 
-**Then the three commands:**
+  # 3. Ask a question
+  curl -X 'POST' \
+    'http://localhost/api/v1/ask' \
+    -H 'accept: */*' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "question": "متى تسقط الدعوى المدنية بالتقادم؟"
+  }'
 
-```bash
-# 1. Start the stack (API + Qdrant + Redis; no GPU required)
-docker-compose down && docker-compose up -d --build
 
-# 2. Build the index from the tracked corpus
-docker-compose exec rag-api python -m ragapp.scripts.ingest_corpus
+  # And, for abstention
 
-# 3. Ask a question
-curl -X 'POST' \
-  'http://localhost:8000/api/v1/ask' \
-  -H 'accept: */*' \
-  -H 'Content-Type: application/json' \
-  -d '{
-  "question": "ما هو مصدر التشريع"
-}'
-```
+  curl -X 'POST' \
+    'http://localhost/api/v1/ask' \
+    -H 'accept: */*' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "question": "ما عقوبة جريمة القتل"             
+  }'
 
-The API is served on <http://localhost:8000>. Interactive docs: `/docs`.
+  # finally,
+  docker-compose --profile cpu down
+  ```
+
+* The API is served on <http://localhost:8000>. Interactive docs: [/docs](http://localhost:8000/docs).
+
+* To build the index
+  ```bash
+  docker-compose exec rag-api python -m ragapp.scripts.ingest_corpus
+  ```
+
+## Run without Docker (development)
+
+  ```bash
+  uv sync
+
+  # Make sure to have redis served on port 6379 and qdrant on port 6333 up and running
+  uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
+  ```
+
+On macOS, force the embedder/reranker onto CPU to avoid a Metal (MPS) assertion
+under concurrency:
+
+  ```bash
+  BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
+  ```
+
 
 ## Endpoints
 
@@ -56,6 +85,19 @@ The API is served on <http://localhost:8000>. Interactive docs: `/docs`.
 | `GET` | `/api/v1/health` | — | `{"status": "ok"}` |
 
 An empty or missing `question` is rejected with `422` (Pydantic validation).
+
+
+## Models and revisions
+
+| Role | Model | Revision |
+|---|---|---|
+| Embedder | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` |
+| Reranker | `BAAI/bge-reranker-v2-m3` | `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` |
+| Generator | `Qwen/Qwen3-0.6B` | served via vLLM |
+
+All three are configurable through the environment (`BGE_M3_MODEL_PATH`,
+`BGE_RERANKER_MODEL_PATH`, `GENERATOR_MODEL`). Pinning an immutable revision per
+model is required.
 
 
 ## Project layout
@@ -74,49 +116,20 @@ docs/              PDR, Architecture, ADRs, implementation plans
 data/corpus/       source + processed corpus (DVC-tracked)
 ```
 
+* For the MLOps Maturity breakdown, visit the branches in this order
+  1. [no-mlops](https://github.com/nurhanhasan/egyptian_civil_code_rag_project/tree/no-mlops)
+  2. [devops-but-not-mlops](https://github.com/nurhanhasan/egyptian_civil_code_rag_project/tree/devops-but-not-mlops)
+  3. [mlops-w-atomated-data-pipeline](https://github.com/nurhanhasan/egyptian_civil_code_rag_project/tree/mlops-w-atomated-data-pipeline)
+  4. [mlops-automated-deployment](https://github.com/nurhanhasan/egyptian_civil_code_rag_project/tree/mlops-automated-deployment)
 
-For a quick offline check without any model server, set in `.env.dev`:
-
-```bash
-GENERATOR_BACKEND=fake
-``` -->
-
-## Models and revisions
-
-| Role | Model | Revision |
-|---|---|---|
-| Embedder | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` |
-| Reranker | `BAAI/bge-reranker-v2-m3` | `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` |
-| Generator | `Qwen/Qwen3-0.6B` | served via vLLM |
-
-All three are configurable through the environment (`BGE_M3_MODEL_PATH`,
-`BGE_RERANKER_MODEL_PATH`, `GENERATOR_MODEL`). Pinning an immutable revision per
-model is required.
-
-## Run without Docker (development)
-
-```bash
-uv sync
-
-# Make sure to have redis served on port 6379 and qdrant on port 6333 up and running
-
-uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
-```
-
-On macOS, force the embedder/reranker onto CPU to avoid a Metal (MPS) assertion
-under concurrency:
-
-```bash
-BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
-```
 
 ## Compose Profiles
 
-- **default** — `rag-api`, `qdrant`, `redis`. Starts anywhere; the 3-command path.
+- **default** — `rag-api`, `qdrant`, `redis`, `nginx` & `langfuse` stack.
 
 - **`--profile gpu`** — adds the private `vllm` server (`Qwen/Qwen2.5-3B-Instruct-AWQ`),
   used instead of running vLLM locally. Needs an NVIDIA container runtime; the port
-  is never published, `rag-api` reaches it at `http://vllm:8000/v1`. Pin `VLLM_IMAGE`.
+  is never published, `rag-api` reaches it at `http://vllm:8000/v1`.
 
 - **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu` service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host with the community
 
@@ -136,31 +149,32 @@ BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
 
 ## Quality gates
 
-```bash
-uv run ruff check .        # lint
-uv run ruff format .       # format
-# uv run pytest tests/unit -q
-# uv run pytest tests/integration -q
-```
+  ```bash
+  uv run ruff check .        # lint
+  uv run ruff format .       # format
+  # uv run pytest tests/unit -q
+  # uv run pytest tests/integration -q
+  ```
 
 ### Experimental tracking
 
 To track experiments:
 
-```bash
-docker-compose -f docker-compose_qdrant.yaml up
-docker-compose up mlflow
-```
+  ```bash
+  docker-compose up qdrant mlflow # or local
+  ```
 
-To evaluate the Query Path:
-```bash
-uv run python -m ragapp.scripts.evaluate ask "ما هو مصدر التشريع"  --tracking-uri http://localhost:5000
-```
+* To evaluate the Query Path:
+  ```bash
+  uv run python -m ragapp.scripts.evaluate ask "ما هو مصدر التشريع"  --tracking-uri http://localhost:5000
+  ```
 
-To evaluate the Offline Ingestion Path:
-```bash
-uv run python -m ragapp.scripts.ingest_corpus
-```
+* To evaluate the Offline Ingestion Path:
+  ```bash
+  dvc pull
+  dvc repro --force
+  uv run python -m ragapp.scripts.ingest_corpus
+  ```
 
 
 ### Evaluation
@@ -168,23 +182,23 @@ uv run python -m ragapp.scripts.ingest_corpus
 - Runs every gold question through the RAG pipeline, captures the generated
 answer plus the retrieved contexts, and scores the run in MLflow with RAGAS.
 
-```bash
-uv run python -m ragapp.scripts.ragas --gold data/gold/gold_set.json \
-        --judge-model qwen3.8-27b-8bit --with-embeddings \
-            --base-url http://localhost:8000/v1  --strict
-```
+  ```bash
+  uv run python -m ragapp.scripts.ragas --gold data/gold/gold_set.json \
+          --judge-model <CHANGEME> --with-embeddings \
+              --base-url http://localhost:8000/v1  --strict
+  ```
 
 ### Load testing
 
-```bash
-uv run locust -f tests/load/locustfile.py \
-  --headless -u 3 -r 2 -t 10s  \
-  --host http://localhost:8000 \
-  --html reports/smoke.html \
-  --stop-timeout 90s
-```
+  ```bash
+  uv run locust -f tests/load/locustfile.py \
+    --headless -u 3 -r 2 -t 10s  \
+    --host http://localhost:8000 \
+    --html reports/smoke.html \
+    --stop-timeout 90s
+  ```
 
-See report `reports/load/report.html` for performance.
+See report `reports/smoke.html` for performance.
 
 
 ## Documentation
