@@ -111,6 +111,11 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION_ALIAS: str = "egyptian-civil-code"
     QDRANT_TIMEOUT: int = 5
 
+    # Local (in-process) BGE-M3 retriever arm — RETRIEVER_BACKEND=bge.
+    # Reads the precomputed index built by scripts/build_local_index.py.
+    RETRIEVER_INDEX_PATH: str = "data/corpus/processed/local_index"
+    RETRIEVER_RRF_K: int = 60
+
     # Rate limiting
     RATE_LIMIT_ENABLED: bool = False
     # Tokens added to each key's bucket per REFILL_PERIOD seconds.
@@ -122,6 +127,10 @@ class Settings(BaseSettings):
     # MLflow
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_EXPERIMENT_NAME: str = "egyptian-civil-code-rag"
+
+    LANGFUSE_SECRET_KEY: str
+    LANGFUSE_PUBLIC_KEY: str
+    LANGFUSE_BASE_URL: str
 
     # params.yaml path
     PARAMS_YAML_PATH: str = "params.yaml"
@@ -168,7 +177,7 @@ class Settings(BaseSettings):
             # Retrieval
             "retriever_backend": self.RETRIEVER_BACKEND,
             "top_k": 5,  # hardcoded in service.py for now
-            "rrf_k": 60,  # default RRF k
+            "rrf_k": self.RETRIEVER_RRF_K,
             "retrieval_mode": "hybrid",
             "jurisdiction": "EG",
             "doc_status": "in_force",

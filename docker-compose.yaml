@@ -4,7 +4,7 @@ services:
 
   # ---------------------------------------------------------------- Dependencies
 
-  redis:
+  redis-cache:
     image: redis:${REDIS_VERSION:-7.0-alpine@sha256:c9d92d840fd011c908f040592857c724ae6d877f2aba5c40ad963276507386b2}
     networks:
       - appnet
@@ -22,6 +22,8 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+    expose:
+     - "6379"
     restart: unless-stopped
     deploy:
       resources:
@@ -52,8 +54,8 @@ services:
 
   # ---------------------------------------------------------------- Generator
 
-  # Private vLLM server (ADR-0003, ADR-0013). GPU profile only — never started
-  # by the default stack, and its port is never published (ADR-0001). Enable:
+  # Private vLLM server. GPU profile only — never started
+  # by the default stack, and its port is never published. Enable:
   #   docker compose --profile gpu up -d
   # Pin the image by digest in production; VLLM_IMAGE overrides the tag.
   vllm:
@@ -75,14 +77,15 @@ services:
       - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/root/.cache/huggingface/hub
     command: >
       ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}
-      --served-model-name ${VLLM_SERVED_MODEL_NAME:-local-llm}
+      --served-model-name ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3-0.6B}
+      --quantization awq
       --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
       --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
       --host 0.0.0.0
       --port 8000
     healthcheck:
       # vLLM exposes /health; a 7B model load takes tens of seconds, so
-      # start_period must cover the load (ADR-0013).
+      # start_period must cover the load.
       test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status==200 else 1)\""]
       interval: 15s
       timeout: 10s
@@ -121,8 +124,8 @@ services:
       # Reuse the host HF cache so models are not re-downloaded.
       - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/root/.cache/huggingface/hub
     command: >
-      ${VLLM_CPU_MODEL:-Qwen/Qwen2.5-3B-Instruct}
-      --served-model-name ${VLLM_SERVED_MODEL_NAME:-local-llm}
+      ${VLLM_CPU_MODEL:-Qwen/Qwen3-0.6B}
+      --served-model-name ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3-0.6B}
       --max-model-len ${VLLM_CPU_MAX_MODEL_LEN:-4096}
       --enforce-eager
       --enable-prefix-caching
@@ -146,31 +149,67 @@ services:
         reservations:
           memory: 10G
 
-  # ----------------------------------------------------------------
+  # ---------------------------------------------------------------- Nginx (Canary Deployment)
+
+  nginx:
+    # image: nginxinc/nginx-unprivileged:stable-alpine@sha256:4714e0b1b2577eaa1a6131d07c958b67f0eb68e6d0521e90c6e5287db8cf0bc5
+    build:
+      context: ./docker
+      dockerfile: Dockerfile-canary-nginx
+      args:
+        PORT: ${NGINX_LISTEN_PORT:-8000}
+        SERVER_NAME: ${SERVER_NAME:-_}
+    networks:
+      - appnet
+    # volumes:
+    #   - ./docker/nginx.template:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      PORT: ${NGINX_LISTEN_PORT:-8000}
+      SERVER_NAME: ${SERVER_NAME:-_}
+    ports:
+      - "${NGINX_PORT:-80}:8000"
+    depends_on:
+      rag-api:
+        condition: service_healthy
+      rag-api-canary:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+  # ---------------------------------------------------------------- APIs
 
   rag-api:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: ${RAG_API_IMAGE:-ecc/backend:dev}
+    image: ${RAG_API_IMAGE:-ecc/api:dev}
     networks:
       - appnet
     env_file:
       - .env.dev
     environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
-      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/0}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis:6379/1}
-      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis:6379/2}
-      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis:6379/3}
+      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
+      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
+      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
       CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      # Generator: point at the private vLLM service (gpu profile). For an
-      # external OpenAI-compatible API set OPENAI_BASE_URL, or GENERATOR_BACKEND=fake.
       GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
-      # Must match the vLLM `--served-model-name` (profile-independent alias).
-      GENERATOR_MODEL: ${GENERATOR_MODEL:-local-llm}
+      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
       WORKERS: ${WORKERS:-1}
       # HF Cache configuration
       HF_HOME: /home/app/.cache/huggingface
@@ -178,18 +217,20 @@ services:
       HF_CACHE_PATH: /home/app/.cache/huggingface/hub
       # Expermental tracking & Evaluation
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      # observability
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
     volumes:
       - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
     depends_on:
-      redis:
+      redis-cache:
         condition: service_healthy
       qdrant:
         condition: service_healthy
       # Optional: only present under the gpu profile. `required: false` keeps
-      # the default GPU-free stack startable without vllm (ADR-0013).
-      # vllm:
-      #   condition: service_healthy
-      #   required: false
+      # the default GPU-free stack startable without vllm.
+      vllm:
+        condition: service_healthy
+        required: false
       # Optional: only present under the cpu profile (same alias `vllm`).
       vllm-cpu:
         condition: service_healthy
@@ -203,9 +244,6 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
-    # Host RAM: BGE-M3 + BGE reranker. On CPU (BGE_DEVICE=cpu) they load in
-    # fp32 — roughly 2x the fp16 footprint — plus torch/FastAPI overhead, so
-    # the cap accounts for the CPU path, not just GPU.
     deploy:
       resources:
         limits:
@@ -213,7 +251,68 @@ services:
         reservations:
           memory: 4G
 
-  # ---------------------------------------------------------------- Evaluation
+  # ---------------------------------------------------------------- Canary API (for canary deployment)
+  # Deploy a separate instance for canary releases
+  # Enable with: docker compose --profile canary up -d
+  # Traffic split controlled via nginx upstream weights (default 90/10 stable/canary)
+
+  rag-api-canary:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ${RAG_API_CANARY_IMAGE:-ecc/api:canary}
+    profiles:
+      - canary
+    networks:
+      - appnet
+    env_file:
+      - .env.dev
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
+      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
+      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
+      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
+      WORKERS: ${WORKERS:-1}
+      HF_HOME: /home/app/.cache/huggingface
+      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
+      HF_CACHE_PATH: /home/app/.cache/huggingface/hub
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
+    volumes:
+      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+        required: false
+      vllm-cpu:
+        condition: service_healthy
+        required: false
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 4G
+
+  # ---------------------------------------------------------------- Experimental Tracking
 
   mlflow:
     image: ghcr.io/mlflow/mlflow:v3.17.0@sha256:78803b7afd156eced665b023554bc199a4723d4466e7cba3732f7284f3cddd11
@@ -228,8 +327,238 @@ services:
       --port 5000
       --backend-store-uri ${MLFLOW_BACKEND_STORE_URI:-sqlite:////mlflow/mlflow.db}
       --artifacts-destination ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
-    profiles:
-      - evaluation
+
+
+  # ---------------------------------------------------------------- Observability
+
+  langfuse-worker:
+    image: docker.langfuse.com/langfuse/langfuse-worker:4
+    networks:
+      - appnet
+    restart: always
+    depends_on: &langfuse-depends-on
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:3030:3030
+    environment: &langfuse-worker-env
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://postgres:postgres@postgres:5432/postgres} # CHANGEME
+      SALT: ${SALT:-mysalt} # CHANGEME
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0000000000000000000000000000000000000000000000000000000000000000} # CHANGEME: generate via `openssl rand -hex 32`
+      TELEMETRY_ENABLED: ${TELEMETRY_ENABLED:-true}
+      LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: ${LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES:-false}
+      # Lets the worker reach the web service internally for in-app agent MCP
+      # calls without redirecting NEXTAUTH_URL, which also builds links for
+      # users. Pair it with LANGFUSE_MCP_ALLOWED_HOSTS on langfuse-web.
+      LANGFUSE_MCP_BASE_URL: ${LANGFUSE_MCP_BASE_URL:-}
+      LANGFUSE_LLM_CONNECTION_WHITELISTED_HOST: ${LANGFUSE_LLM_CONNECTION_WHITELISTED_HOST:-}
+      LANGFUSE_LLM_CONNECTION_WHITELISTED_IPS: ${LANGFUSE_LLM_CONNECTION_WHITELISTED_IPS:-}
+      LANGFUSE_LLM_CONNECTION_WHITELISTED_IP_SEGMENTS: ${LANGFUSE_LLM_CONNECTION_WHITELISTED_IP_SEGMENTS:-}
+      # Empty defaults leave egress policy unchanged until an operator sets them.
+      LANGFUSE_LLM_CONNECTION_ALLOWED_HOSTS: ${LANGFUSE_LLM_CONNECTION_ALLOWED_HOSTS:-}
+      LANGFUSE_WEBHOOK_ALLOWED_HOSTS: ${LANGFUSE_WEBHOOK_ALLOWED_HOSTS:-}
+      LANGFUSE_EXTERNAL_MEDIA_STORAGE_ENDPOINT_ALLOWED_HOSTS: ${LANGFUSE_EXTERNAL_MEDIA_STORAGE_ENDPOINT_ALLOWED_HOSTS:-}
+      LANGFUSE_SSO_DISCOVERY_ALLOWED_HOSTS: ${LANGFUSE_SSO_DISCOVERY_ALLOWED_HOSTS:-}
+      LANGFUSE_OUTBOUND_BLOCKED_IP_SEGMENTS: ${LANGFUSE_OUTBOUND_BLOCKED_IP_SEGMENTS:-}
+      CLICKHOUSE_MIGRATION_URL: ${CLICKHOUSE_MIGRATION_URL:-clickhouse://clickhouse:9000}
+      CLICKHOUSE_URL: ${CLICKHOUSE_URL:-http://clickhouse:8123}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse} # CHANGEME
+      CLICKHOUSE_CLUSTER_ENABLED: ${CLICKHOUSE_CLUSTER_ENABLED:-false}
+      CLICKHOUSE_CLUSTER_NAME: ${CLICKHOUSE_CLUSTER_NAME:-default}
+      LANGFUSE_JSON_BAD_UNICODE_ESCAPE: ${LANGFUSE_JSON_BAD_UNICODE_ESCAPE:-}
+      LANGFUSE_USE_AZURE_BLOB: ${LANGFUSE_USE_AZURE_BLOB:-false}
+      LANGFUSE_USE_OCI_NATIVE_OBJECT_STORAGE: ${LANGFUSE_USE_OCI_NATIVE_OBJECT_STORAGE:-false}
+      LANGFUSE_OCI_AUTH_TYPE: ${LANGFUSE_OCI_AUTH_TYPE:-workload_identity}
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: ${LANGFUSE_S3_EVENT_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: ${LANGFUSE_S3_EVENT_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID:-minio}
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: ${LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT:-http://minio:9000}
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: ${LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE:-true}
+      LANGFUSE_S3_EVENT_UPLOAD_PREFIX: ${LANGFUSE_S3_EVENT_UPLOAD_PREFIX:-events/}
+      LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: ${LANGFUSE_S3_MEDIA_UPLOAD_BUCKET:-langfuse}
+      LANGFUSE_S3_MEDIA_UPLOAD_REGION: ${LANGFUSE_S3_MEDIA_UPLOAD_REGION:-auto}
+      LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: ${LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID:-minio}
+      LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: ${LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://minio:9000}
+      LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: ${LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE:-true}
+      LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: ${LANGFUSE_S3_MEDIA_UPLOAD_PREFIX:-media/}
+      LANGFUSE_S3_MEDIA_UPLOAD_REQUEST_TIMEOUT_MS: ${LANGFUSE_S3_MEDIA_UPLOAD_REQUEST_TIMEOUT_MS:-30000}
+      LANGFUSE_OBSERVATION_FIELD_OVERFLOW_ENABLED: ${LANGFUSE_OBSERVATION_FIELD_OVERFLOW_ENABLED:-false}
+      LANGFUSE_OBSERVATION_FIELD_SIZE_LIMIT_BYTES: ${LANGFUSE_OBSERVATION_FIELD_SIZE_LIMIT_BYTES:-2097152}
+      LANGFUSE_S3_BATCH_EXPORT_ENABLED: ${LANGFUSE_S3_BATCH_EXPORT_ENABLED:-false}
+      LANGFUSE_S3_BATCH_EXPORT_BUCKET: ${LANGFUSE_S3_BATCH_EXPORT_BUCKET:-langfuse}
+      LANGFUSE_S3_BATCH_EXPORT_PREFIX: ${LANGFUSE_S3_BATCH_EXPORT_PREFIX:-exports/}
+      LANGFUSE_S3_BATCH_EXPORT_REGION: ${LANGFUSE_S3_BATCH_EXPORT_REGION:-auto}
+      LANGFUSE_S3_BATCH_EXPORT_ENDPOINT: ${LANGFUSE_S3_BATCH_EXPORT_ENDPOINT:-http://minio:9000}
+      LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT: ${LANGFUSE_S3_BATCH_EXPORT_EXTERNAL_ENDPOINT:-http://localhost:9090}
+      LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID: ${LANGFUSE_S3_BATCH_EXPORT_ACCESS_KEY_ID:-minio}
+      LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY: ${LANGFUSE_S3_BATCH_EXPORT_SECRET_ACCESS_KEY:-miniosecret} # CHANGEME
+      LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE: ${LANGFUSE_S3_BATCH_EXPORT_FORCE_PATH_STYLE:-true}
+      LANGFUSE_INGESTION_QUEUE_DELAY_MS: ${LANGFUSE_INGESTION_QUEUE_DELAY_MS:-}
+      LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS: ${LANGFUSE_INGESTION_CLICKHOUSE_WRITE_INTERVAL_MS:-}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_AUTH: ${REDIS_AUTH:-myredissecret} # CHANGEME
+      LANGFUSE_BULLMQ_SKIP_REDIS_VERSION_CHECK: ${LANGFUSE_BULLMQ_SKIP_REDIS_VERSION_CHECK:-false}
+      REDIS_TLS_ENABLED: ${REDIS_TLS_ENABLED:-false}
+      REDIS_TLS_CA: ${REDIS_TLS_CA:-/certs/ca.crt}
+      REDIS_TLS_CERT: ${REDIS_TLS_CERT:-/certs/redis.crt}
+      REDIS_TLS_KEY: ${REDIS_TLS_KEY:-/certs/redis.key}
+      EMAIL_FROM_ADDRESS: ${EMAIL_FROM_ADDRESS:-}
+      SMTP_CONNECTION_URL: ${SMTP_CONNECTION_URL:-}
+      # Shared AI features configuration. These apply to AI features that run
+      # in both web and worker.
+      LANGFUSE_IN_APP_AGENT_ENABLED: ${LANGFUSE_IN_APP_AGENT_ENABLED:-}
+      LANGFUSE_EVALUATOR_MEDIA_TRANSPORT: ${LANGFUSE_EVALUATOR_MEDIA_TRANSPORT:-}
+      LANGFUSE_EVALUATOR_MEDIA_INLINE_MAX_BYTES: ${LANGFUSE_EVALUATOR_MEDIA_INLINE_MAX_BYTES:-}
+      LANGFUSE_AI_PROVIDER: ${LANGFUSE_AI_PROVIDER:-}
+      LANGFUSE_AI_MODEL: ${LANGFUSE_AI_MODEL:-}
+      LANGFUSE_AI_SMALL_MODEL: ${LANGFUSE_AI_SMALL_MODEL:-}
+      LANGFUSE_AI_API_KEY: ${LANGFUSE_AI_API_KEY:-}
+      LANGFUSE_AI_BASE_URL: ${LANGFUSE_AI_BASE_URL:-}
+      LANGFUSE_AI_USE_RESPONSES_API: ${LANGFUSE_AI_USE_RESPONSES_API:-}
+      LANGFUSE_AI_EXTRA_HEADERS: ${LANGFUSE_AI_EXTRA_HEADERS:-}
+      LANGFUSE_AI_AWS_BEDROCK_REGION: ${LANGFUSE_AI_AWS_BEDROCK_REGION:-}
+      LANGFUSE_AI_VERTEX_LOCATION: ${LANGFUSE_AI_VERTEX_LOCATION:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_PROFILE: ${AWS_PROFILE:-}
+      LANGFUSE_AI_FEATURES_AWS_PROFILE: ${LANGFUSE_AI_FEATURES_AWS_PROFILE:-}
+      LANGFUSE_IN_APP_AGENT_AWS_PROFILE: ${LANGFUSE_IN_APP_AGENT_AWS_PROFILE:-}
+      # In-app agent worker settings (ignored by the web service).
+      LANGFUSE_IN_APP_AGENT_RUN_QUEUE_PROCESSING_CONCURRENCY: ${LANGFUSE_IN_APP_AGENT_RUN_QUEUE_PROCESSING_CONCURRENCY:-}
+      LANGFUSE_IN_APP_AGENT_SANDBOX_PROVIDER: ${LANGFUSE_IN_APP_AGENT_SANDBOX_PROVIDER:-}
+      LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_IMAGE_IDENTIFIER: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_IMAGE_IDENTIFIER:-}
+      LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EXECUTION_ROLE_ARN: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EXECUTION_ROLE_ARN:-}
+      LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EGRESS_NETWORK_CONNECTOR_ARN: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EGRESS_NETWORK_CONNECTOR_ARN:-}
+      LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_REGION: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_REGION:-}
+
+  langfuse-web:
+    image: docker.langfuse.com/langfuse/langfuse:4
+    networks:
+      - appnet
+    restart: always
+    depends_on: *langfuse-depends-on
+    ports:
+      - 3000:3000
+    environment:
+      <<: *langfuse-worker-env
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
+      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9090}
+      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT:-http://minio:9000}
+      LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
+      LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
+      LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
+      LANGFUSE_INIT_PROJECT_NAME: ${LANGFUSE_INIT_PROJECT_NAME:-}
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: ${LANGFUSE_INIT_PROJECT_PUBLIC_KEY:-}
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: ${LANGFUSE_INIT_PROJECT_SECRET_KEY:-}
+      LANGFUSE_INIT_USER_EMAIL: ${LANGFUSE_INIT_USER_EMAIL:-}
+      LANGFUSE_INIT_USER_NAME: ${LANGFUSE_INIT_USER_NAME:-}
+      LANGFUSE_INIT_USER_PASSWORD: ${LANGFUSE_INIT_USER_PASSWORD:-}
+      LANGFUSE_MARKDOWN_RENDER_CHARACTER_LIMIT: ${LANGFUSE_MARKDOWN_RENDER_CHARACTER_LIMIT:-}
+      LANGFUSE_TRUSTED_PROXY_COUNT: ${LANGFUSE_TRUSTED_PROXY_COUNT:-}
+      # Hostnames allowed to reach the MCP endpoint, beyond NEXTAUTH_URL's own
+      # host. Required when the worker uses LANGFUSE_MCP_BASE_URL.
+      LANGFUSE_MCP_ALLOWED_HOSTS: ${LANGFUSE_MCP_ALLOWED_HOSTS:-}
+      # In-app agent settings.
+      LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER:-}
+      LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG:-}
+
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:25.12
+    networks:
+      - appnet
+    restart: always
+    user: "101:101"
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-clickhouse}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-clickhouse} # CHANGEME
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+      - langfuse_clickhouse_logs:/var/log/clickhouse-server
+    ports:
+      - 127.0.0.1:8123:8123
+      - 127.0.0.1:9000:9000
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 1s
+
+  minio:
+    image: cgr.dev/chainguard/minio
+    networks:
+      - appnet
+    restart: always
+    entrypoint: sh
+    # create the 'langfuse' bucket before starting the service
+    command: -c 'mkdir -p /data/langfuse && minio server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret} # CHANGEME
+    ports:
+      - 9090:9000
+      - 127.0.0.1:9091:9001
+    volumes:
+      - langfuse_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
+      start_period: 1s
+
+  redis:
+    image: docker.io/redis:7
+    networks:
+      - appnet
+    restart: always
+    # CHANGEME: row below to secure redis password
+    command: >
+      --requirepass ${REDIS_AUTH:-myredissecret}
+      --maxmemory-policy noeviction
+    ports:
+      - 127.0.0.1:6379:6379
+    volumes:
+      - langfuse_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+
+  postgres:
+    image: docker.io/postgres:${POSTGRES_VERSION:-17}
+    networks:
+      - appnet
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres} # CHANGEME
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      - 127.0.0.1:5432:5432
+    volumes:
+      - langfuse_postgres_data:/var/lib/postgresql/data
 
 
 networks:
@@ -239,3 +568,13 @@ networks:
 volumes:
   redis-data:
   qdrant-data:
+  langfuse_postgres_data:
+    driver: local
+  langfuse_clickhouse_data:
+    driver: local
+  langfuse_clickhouse_logs:
+    driver: local
+  langfuse_minio_data:
+    driver: local
+  langfuse_redis_data:
+    driver: local

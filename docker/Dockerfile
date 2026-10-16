@@ -1,8 +1,8 @@
 # ─── FastAPI — production multi-stage image ─────────────────────
 #
 # Build:        docker build -t ??
-# Run API:      docker run --rm -p 8000:8000 --env-file .env.<env_name> ecc/backend:latest
-# Run migrate:  docker run --rm --env-file .env.<env_name> ecc/backend:latest alembic upgrade head
+# Run API:      docker run --rm -p 8000:8000 --env-file .env.<env_name> ecc/api:latest
+# Run migrate:  docker run --rm --env-file .env.<env_name> ecc/api:latest alembic upgrade head
 
 ARG PYTHON_IMAGE=python:3.12.13-slim@sha256:229a2c5bfa27522db7815ea81f9bed70af17ccb9de9fc7ad142b1877b5830d36
 
@@ -51,6 +51,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Application source + migration tree.
 COPY --chown=app:app pyproject.toml uv.lock ./
+COPY --chown=app:app qdrant_storage/ /app/qdrant_storage/
 COPY --chown=app:app src/ /app/src/
 # COPY --chown=app:app ./migrations    ./migrations
 # COPY --chown=app:app alembic.ini     ./

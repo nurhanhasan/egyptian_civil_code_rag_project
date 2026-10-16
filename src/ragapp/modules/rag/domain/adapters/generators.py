@@ -11,6 +11,7 @@ Concrete adapters for the `Generator` port.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from openai import AsyncOpenAI as _Aopenai
@@ -18,6 +19,23 @@ from openai import AsyncOpenAI as _Aopenai
 from ragapp.exceptions.domain import GeneratorError
 
 logger = logging.getLogger(__name__)
+
+_THINK_BLOCK = re.compile(r"<think\b[^>]*>.*?</think>", re.DOTALL)
+_THINK_OPEN = re.compile(r"<think\b[^>]*>.*$", re.DOTALL)
+
+
+def strip_reasoning(text: str) -> str:
+    """Drop inline chain-of-thought traces some models (e.g. Qwen3) emit.
+
+    Reasoning is not part of the answer: leaving it in leaks raw deliberation to
+    users and pollutes downstream evaluation (RAGAS faithfulness extracts its
+    statements from the response text).
+    """
+    if "<think" not in text:
+        return text.strip()
+    text = _THINK_BLOCK.sub("", text)
+    text = _THINK_OPEN.sub("", text)
+    return text.strip()
 
 
 class _FakeGenerator:
@@ -93,7 +111,7 @@ class _OpenAIBackend:
                 message="Generator returned no choices",
                 details={"model": self._model},
             )
-        return resp.choices[0].message.content or ""
+        return strip_reasoning(resp.choices[0].message.content or "")
 
     async def close(self) -> None:
         try:

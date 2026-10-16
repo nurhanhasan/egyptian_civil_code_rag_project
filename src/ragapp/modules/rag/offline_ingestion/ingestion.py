@@ -152,7 +152,7 @@ def run_ingestion(
     Args:
         settings: Application settings
         qdrant_url: Qdrant server URL
-        alias: Stable alias name (ADR-0005)
+        alias: Stable alias name
         chunks_path: Path to chunks JSONL file
         batch_size: Embedding batch size
         upsert_batch: Upsert batch size

@@ -4,7 +4,7 @@
   - [Run Q\&A in 3 commands](#run-qa-in-3-commands)
   - [Endpoints](#endpoints)
   - [Project layout](#project-layout)
-    - [Compose Profiles](#compose-profiles)
+  - [Compose Profiles](#compose-profiles)
   - [Quality gates](#quality-gates)
     - [Experimental tracking](#experimental-tracking)
     - [Evaluation](#evaluation)
@@ -87,16 +87,19 @@ GENERATOR_BACKEND=fake
 |---|---|---|
 | Embedder | `BAAI/bge-m3` | `5617a9f61b028005a4858fdac845db406aefb181` |
 | Reranker | `BAAI/bge-reranker-v2-m3` | `953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e` |
-| Generator | `Qwen/Qwen2.5-3B-Instruct-AWQ` | served via vLLM in the GPU profile |
+| Generator | `Qwen/Qwen3-0.6B` | served via vLLM |
 
 All three are configurable through the environment (`BGE_M3_MODEL_PATH`,
 `BGE_RERANKER_MODEL_PATH`, `GENERATOR_MODEL`). Pinning an immutable revision per
-model is required (ADR-0013).
+model is required.
 
 ## Run without Docker (development)
 
 ```bash
 uv sync
+
+# Make sure to have redis served on port 6379 and qdrant on port 6333 up and running
+
 uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
 ```
 
@@ -107,13 +110,15 @@ under concurrency:
 BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
 ```
 
-### Compose Profiles
+## Compose Profiles
 
 - **default** — `rag-api`, `qdrant`, `redis`. Starts anywhere; the 3-command path.
 
 - **`--profile gpu`** — adds the private `vllm` server (`Qwen/Qwen2.5-3B-Instruct-AWQ`),
   used instead of running vLLM locally. Needs an NVIDIA container runtime; the port
   is never published, `rag-api` reaches it at `http://vllm:8000/v1`. Pin `VLLM_IMAGE`.
+
+- **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu` service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host with the community
 
   ```bash
   docker compose --profile gpu up -d
@@ -122,44 +127,11 @@ BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
 - **`--profile cpu`** — adds a CPU-only `vllm` (no GPU needed), served as the alias
   `vllm` so `rag-api` uses the same URL. AWQ is unsupported on the ARM CPU image
   (AWQ is x86/s390x/Power only), so it runs the unquantized
-  `Qwen/Qwen2.5-3B-Instruct` — which must be fully downloaded first. Do not
-  combine with `--profile gpu`.
+  `Qwen/Qwen3-0.6B` 
 
   ```bash
   docker compose --profile cpu up -d
   ```
-
-- **`--profile evaluation`** — adds a self-hosted MLflow server
-  (<http://localhost:5000>) for experiment tracking.
-
-### macOS: run vLLM on the host (Metal)
-
-On Apple Silicon the container CPU image has **no Metal backend** and its ARM CPU
-path does not support AWQ, so a container cannot reproduce a GPU-accelerated
-local setup. Run vLLM on the host with the `vllm-metal` plugin (MLX) and point the
-app at it:
-
-```bash
-VLLM_METAL_USE_MLX=1 VLLM_MLX_DEVICE=gpu \
-  vllm serve Qwen/Qwen2.5-3B-Instruct-AWQ \
-  --quantization awq --max-model-len 8192 --port 7080
-```
-
-Then run the API (locally or in Docker) against it:
-
-```bash
-# local API -> localhost
-OPENAI_BASE_URL=http://localhost:7080/v1 \
-  uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
-
-# containerised API -> host
-OPENAI_BASE_URL=http://host.docker.internal:7080/v1 \
-  docker compose up -d --build
-```
-
-Set `GENERATOR_MODEL` to the name the server advertises (here
-`Qwen/Qwen2.5-3B-Instruct-AWQ`), or add `--served-model-name local-llm` to the
-`vllm serve` command and use `local-llm`.
 
 
 ## Quality gates
@@ -177,7 +149,7 @@ To track experiments:
 
 ```bash
 docker-compose -f docker-compose_qdrant.yaml up
-docker-compose --profile evaluation up mlflow 
+docker-compose up mlflow
 ```
 
 To evaluate the Query Path:
@@ -193,6 +165,14 @@ uv run python -m ragapp.scripts.ingest_corpus
 
 ### Evaluation
 
+- Runs every gold question through the RAG pipeline, captures the generated
+answer plus the retrieved contexts, and scores the run in MLflow with RAGAS.
+
+```bash
+uv run python -m ragapp.scripts.ragas --gold data/gold/gold_set.json \
+        --judge-model qwen3.8-27b-8bit --with-embeddings \
+            --base-url http://localhost:8000/v1  --strict
+```
 
 ### Load testing
 

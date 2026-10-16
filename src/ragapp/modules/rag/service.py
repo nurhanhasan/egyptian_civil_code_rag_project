@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 import time
 
+from langfuse import observe
+
 from ragapp.modules.rag.domain.entities import ScoredChunk
 from ragapp.modules.rag.domain.ports import Embedder, Generator, Reranker, Retriever
 from ragapp.modules.rag.schema import AbstentionResponse, AskResponse, Citation
@@ -115,11 +117,13 @@ class RAGPipelineService:
 
         return False, None
 
+    @observe()
     async def run_pipeline(self, question: str) -> AskResponse | AbstentionResponse:
         """Answer `question` via the configured pipeline.
 
         Returns structured response with citations or abstention.
         """
+
         question_embeddings = await self._embedder.embed([question])
 
         retrieved_chunks = await self._retriever.retrieve(

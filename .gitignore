@@ -153,6 +153,9 @@ activemq-data/
 .env.test
 .env.stage
 .env.prod
+.env.dev
+.env.local
+!.env.example
 .envrc
 .venv
 env/
@@ -224,7 +227,5 @@ __marimo__/
 # Output of dvc extract and chunk pipeline
 data/corpus/processed/
 
-# Qdrant (external vector store)
-qdrant_storage/
-
+mlflow/
 mlflow.db

@@ -67,7 +67,7 @@ def _chunk_id_from_point(point_id: uuid.UUID, payload: dict | None) -> str:
 def _mandatory_filter(jurisdiction: str, doc_status: str) -> qm.Filter:
     """Both conditions, always — an unfiltered query cannot be built here."""
     if not jurisdiction or not doc_status:
-        raise ValueError("jurisdiction and doc_status are mandatory filters (ADR-0005)")
+        raise ValueError("jurisdiction and doc_status are mandatory filters")
     return qm.Filter(
         must=[
             qm.FieldCondition(
@@ -89,11 +89,11 @@ def _to_sparse_vector(sparse: dict[int, float]) -> SparseVector:
 
 
 def create_build_collection(client: QdrantClient, build_id: str, dense_dim: int) -> str:
-    """Create a NEW immutable index build (ADR-0005). Returns the collection name.
+    """Create a NEW immutable index build. Returns the collection name.
 
     Ingestion never mutates a live collection: the build is a fresh
     collection named by its immutable `build_id`, with the named dense +
-    sparse vectors (ADR-0004) and payload indexes on both mandatory filter
+    sparse vectors and payload indexes on both mandatory filter
     fields. The request path only ever sees the alias.
     """
     client.create_collection(
@@ -116,8 +116,8 @@ def chunk_to_point(
     """Chunk + its vectors -> a Qdrant point (ingestion-side schema owner).
 
     The payload carries every `Chunk` field so the request path can rebuild
-    citations verbatim: `raw_text` is the only text quoted in citations
-    (ADR-0006), `source_checksum` + `effective_date` guard staleness.
+    citations verbatim: `raw_text` is the only text quoted in citations,
+    `source_checksum` + `effective_date` guard staleness.
     """
     return qm.PointStruct(
         id=_to_point_id(chunk.chunk_id),
@@ -173,8 +173,8 @@ def chunk_from_point(point_id: object, payload: dict | None) -> Chunk:
 def promote_build(client: QdrantClient, alias: str, build_id: str) -> None:
     """Point the stable alias at `build_id` (promotion).
 
-    Rollback is the same call with the previous build id (ADR-0005). One
-    batch of two alias operations: a temp alias on the new build, renamed
+    Rollback is the same call with the previous build id. One batch of
+    two alias operations: a temp alias on the new build, renamed
     over the live alias.
     """
     temp_alias = f"{alias}__next"
@@ -198,7 +198,7 @@ class QdrantRetriever:
     """Retriever port implementation backed by Qdrant.
 
     Reads the stable alias only; promotion/rollback is an offline alias
-    change, never an image rebuild or collection mutation (ADR-0005).
+    change, never an image rebuild or collection mutation.
     """
 
     def __init__(
@@ -213,7 +213,7 @@ class QdrantRetriever:
         if not collection_alias:
             raise ValueError(
                 "collection_alias is required — the request path reads the "
-                "stable alias, never a collection name (ADR-0005)"
+                "stable alias, never a collection name"
             )
         if rrf_k < 1:
             raise ValueError("rrf_k must be >= 1")

@@ -1,0 +1,13 @@
+FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:4714e0b1b2577eaa1a6131d07c958b67f0eb68e6d0521e90c6e5287db8cf0bc5
+
+ARG PORT= \
+    SERVER_NAME= \
+
+ENV PORT=${PORT} \
+    SERVER_NAME=${SERVER_NAME} \
+
+COPY nginx.template /etc/nginx/templates/default.conf.template
+
+USER nginx
+
+EXPOSE ${PORT}
