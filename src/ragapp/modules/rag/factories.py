@@ -16,6 +16,7 @@ from ragapp.modules.rag.domain.adapters.embedders import (
     _FakeEmbedder,
 )
 from ragapp.modules.rag.domain.adapters.generators import _FakeGenerator, _OpenAIBackend
+from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
 from ragapp.modules.rag.domain.adapters.rerankers import (
     BentoMLBGEReranker,
     _FakeReranker,
@@ -47,10 +48,15 @@ def _get_generator_cached(
     reset_generator_cache() for test isolation, clears the cache between
     tests for isolation.
     """
+    logger.info(f"Creating generator: backend={backend}")
+
     if backend == "fake":
+        logger.info("Using _FakeGenerator")
         return _FakeGenerator()
 
     if backend == "openai":
+        logger.info("Using _OpenAIBackend")
+        logger.info(f"OpenAI Base URL: {openai_base_url}, Model: {generator_model}")
         if not openai_base_url:
             raise ValueError(
                 "GENERATOR_BACKEND=openai requires OPENAI_BASE_URL "
@@ -115,16 +121,28 @@ def get_embedder(settings: Settings) -> Embedder:
     return _get_embedder_cached(settings.EMBEDDER_BACKEND, settings.BGE_DEVICE)
 
 
+def reset_embedder_cache() -> None:
+    """Clear the embedder factory cache (used by tests)."""
+    _get_embedder_cached.cache_clear()
+
+
 @lru_cache(maxsize=1)
 def _get_retriever_cached(
-    backend: str, collection_alias: str, url: str | None, timeout: int | None
+    backend: str,
+    collection_alias: str,
+    url: str | None,
+    timeout: int | None,
+    index_path: str,
+    rrf_k: int,
 ) -> Retriever:
     """
     Build the configured Retriever.
 
-        RETRIEVER_BACKEND=qdrant  -> QdrantRetriever over QDRANT_URL,
-                                     reading the stable alias
-                                     QDRANT_COLLECTION_ALIAS
+        RETRIEVER_BACKEND=qdrant -> QdrantRetriever over QDRANT_URL,
+                                    reading the stable alias
+                                    QDRANT_COLLECTION_ALIAS
+        RETRIEVER_BACKEND=bge    -> BgeM3Retriever over a precomputed local
+                                    index at RETRIEVER_INDEX_PATH
 
     QDRANT_URL=":memory:" selects Qdrant's in-process local store —
     hermetic, GPU/docker-free CI and local dev.
@@ -143,7 +161,13 @@ def _get_retriever_cached(
 
         return QdrantRetriever(client=client, collection_alias=collection_alias)
 
-    raise ValueError(f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant")
+    if backend == "bge":
+        logger.info(f"Using BgeM3Retriever over local index: {index_path}")
+        return BgeM3Retriever(index_path, rrf_k=rrf_k)
+
+    raise ValueError(
+        f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant, bge"
+    )
 
 
 def get_retriever(settings: Settings) -> Retriever:
@@ -152,6 +176,10 @@ def get_retriever(settings: Settings) -> Retriever:
         url=settings.QDRANT_URL,
         collection_alias=settings.QDRANT_COLLECTION_ALIAS,
         timeout=settings.QDRANT_TIMEOUT,
+        index_path=getattr(
+            settings, "RETRIEVER_INDEX_PATH", "data/corpus/processed/local_index"
+        ),
+        rrf_k=getattr(settings, "RETRIEVER_RRF_K", 60),
     )
 
 

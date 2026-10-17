@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import time
+from typing import Any
 
-from langfuse import observe
+from langfuse import LangfuseSpan, get_client
 
 from ragapp.modules.rag.domain.entities import ScoredChunk
 from ragapp.modules.rag.domain.ports import Embedder, Generator, Reranker, Retriever
@@ -117,48 +117,98 @@ class RAGPipelineService:
 
         return False, None
 
-    @observe()
-    async def run_pipeline(self, question: str) -> AskResponse | AbstentionResponse:
+    def _instrument(
+        self, span: LangfuseSpan, as_type: str, name: str, input: Any, output: Any
+    ) -> None:
+        child = span.start_observation(name=name, as_type=as_type)
+        child.update(input=input)
+        child.update(output=output)
+        child.end()
+
+    # @observe()
+    async def run_pipeline(
+        self, question: str
+    ) -> tuple[AskResponse | AbstentionResponse, str]:
         """Answer `question` via the configured pipeline.
 
         Returns structured response with citations or abstention.
         """
 
-        question_embeddings = await self._embedder.embed([question])
+        # TODO: Initialize once at startup
+        try:
+            langfuse_client = get_client()
+            langfuse_client.auth_check()
+        except Exception as e:
+            logger.warning("Langfuse authentication check failed: %s", e)
 
-        retrieved_chunks = await self._retriever.retrieve(
-            dense=question_embeddings.dense[0],
-            sparse=question_embeddings.sparse[0],
-            top_k=5,
-            jurisdiction="EG",
-            doc_status="in_force",
-        )
+        with langfuse_client.start_as_current_observation(
+            name="main-span", input=question
+        ) as span:
+            with span.start_as_current_observation(
+                name="embedding-question", as_type="embedding", input=question
+            ) as embedding_span:
+                question_embeddings = await self._embedder.embed([question])
+                embedding_span.update(output=question_embeddings)
 
-        reranked = await self._reranker.rerank(question, retrieved_chunks)
+            with span.start_as_current_observation(
+                name="retrieving",
+                as_type="retriever",
+                input=question_embeddings,
+            ) as retrieval_span:
+                retrieved_chunks = await self._retriever.retrieve(
+                    dense=question_embeddings.dense[0],
+                    sparse=question_embeddings.sparse[0],
+                    top_k=5,
+                    jurisdiction="EG",
+                    doc_status="in_force",
+                )
+                retrieval_span.update(
+                    output=[chunk.chunk.raw_text for chunk in retrieved_chunks]
+                )
 
-        # Check abstention before generation
-        if not reranked or not reranked[0].chunk:
-            return AbstentionResponse(reason="no_relevant_documents")
+            with span.start_as_current_observation(
+                name="reranker", as_type="evaluator", input=retrieved_chunks
+            ) as reranker_span:
+                reranked = await self._reranker.rerank(question, retrieved_chunks)
+                reranker_span.update(output=reranked)
 
-        context = self._build_context(reranked)
-        messages = self._build_messages(question, context)
+            # Check abstention before generation
+            if not reranked or not reranked[0].chunk:
+                return AbstentionResponse(reason="no_relevant_documents"), span.trace_id
 
-        # calculate elapsed time inside GENERATOR
-        start_time = time.time()
-        logger.info("Request sent to GENERATOR")
-        answer = await self._generator.generate(messages)
-        elapsed_time = time.time() - start_time
-        logger.info(f"Request duration inside GENERATOR: {elapsed_time:.3f} seconds")
+            with span.start_as_current_observation(
+                name="generate", as_type="generation", input=reranked
+            ) as generation_span:
+                context = self._build_context(reranked)
+                messages = self._build_messages(question, context)
 
-        # Post-generation abstention checks
-        should_abstain, reason = self._check_abstention(reranked, answer)
-        if should_abstain:
-            return AbstentionResponse(reason=reason)
+                answer = await self._generator.generate(messages)
 
-        # Build citations from reranked chunks
-        citations = self._build_citations(reranked)
+                generation_span.update(output=answer)
 
-        return AskResponse(answer=answer, sources=citations)
+            span.update(output=answer)
+
+            with span.start_as_current_observation(
+                name="citation", as_type="span", input=reranked
+            ) as citation_span:
+                # Post-generation abstention checks
+                should_abstain, reason = self._check_abstention(reranked, answer)
+                if should_abstain:
+                    return AbstentionResponse(reason=reason), span.trace_id
+
+                # Build citations from reranked chunks
+                citations = self._build_citations(reranked)
+                citation_span.update(
+                    output=[citation.article for citation in citations]
+                )
+
+            langfuse_client.flush()
+
+        return AskResponse(
+            answer=answer,
+            sources=[citation.article for citation in citations],
+            trace_id=span.trace_id,
+        ), span.trace_id
 
     async def close(self) -> None:
         await self._generator.close()

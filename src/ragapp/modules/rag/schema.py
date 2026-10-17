@@ -28,7 +28,7 @@ class AskRequest(BaseModel):
 
 class AskResponse(BaseModel):
     answer: str
-    sources: list[Citation]
+    sources: list[str]
 
 
 class AbstentionResponse(BaseModel):

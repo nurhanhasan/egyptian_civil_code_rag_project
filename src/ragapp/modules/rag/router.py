@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Response, status
 from fastapi.responses import JSONResponse
 
 from ragapp.modules.rag.dependency.rag import get_rag_pipeline_service
@@ -18,20 +18,26 @@ router = APIRouter(tags=["RAG"])
 )
 async def ask(
     request: AskRequest,
+    response: Response,
     service: RAGPipelineService = Depends(get_rag_pipeline_service),
 ) -> AskResponse | AbstentionResponse:
     """Answer a question about the Egyptian Civil Code.
 
     Returns structured response with answer and citations,
     or abstention with reason and no answer text.
+
+    Trace ID is set to the generated X-Trace-ID for logging and tracing.
     """
-    result = await service.run_pipeline(request.question)
+    result, trace_id = await service.run_pipeline(request.question)
+
+    response.headers["X-Trace-ID"] = trace_id
 
     # Abstention responses should be 200 but with abstained=True
     if isinstance(result, AbstentionResponse):
         return JSONResponse(
             status_code=status.HTTP_200_OK,
             content=result.model_dump(mode="json"),
+            headers={"X-Trace-ID": trace_id},
         )
 
     return result

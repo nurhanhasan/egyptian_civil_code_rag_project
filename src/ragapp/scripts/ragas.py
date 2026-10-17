@@ -23,6 +23,7 @@ from typing import Any
 
 import click
 from langchain_openai import ChatOpenAI
+from langfuse import get_client
 from ragas import EvaluationDataset, SingleTurnSample, evaluate
 from ragas.embeddings.base import BaseRagasEmbeddings
 from ragas.llms import LangchainLLMWrapper
@@ -37,6 +38,7 @@ from ragapp.modules.rag.factories import (
     get_generator,
     get_reranker,
     get_retriever,
+    reset_embedder_cache,
 )
 from ragapp.modules.rag.schema import AbstentionResponse
 from ragapp.modules.rag.service import RAGPipelineService
@@ -154,6 +156,7 @@ def _build_judge(
     if no_think:
         extra_body = {"chat_template_kwargs": {"enable_thinking": False}}
 
+    # TODO: Replace
     chat = ChatOpenAI(
         model=model or settings.GENERATOR_MODEL,
         base_url=base_url or settings.OPENAI_BASE_URL,
@@ -187,6 +190,7 @@ def _build_metrics(
         LLMContextRecall(llm=judge),
     ]
     if embedder is not None:
+        # TODO: CHeck with get_embedder
         embeddings = _AppEmbedderRagas(embedder, run_config)
         metrics.append(AnswerCorrectness(llm=judge, embeddings=embeddings))
         metrics.append(AnswerRelevancy(llm=judge, embeddings=embeddings))
@@ -225,6 +229,7 @@ async def _collect_responses(
             "latency_ms": latency_ms,
             "citation_count": citation_count,
             "rerank_top_score": rerank_top_score,
+            "trace_id": response.trace_id,
         }
 
     results = await asyncio.gather(
@@ -527,7 +532,14 @@ def main(
             max_workers=judge_concurrency,
         )
         judge = _build_judge(settings, judge_model, base_url, no_think)
-        embedder = get_embedder(settings) if with_embeddings else None
+
+        if with_embeddings:
+            # _collect_responses() closed the cached singleton embedder; evict it
+            # so the RAGAS embedding metrics get a live model, not model=None.
+            reset_embedder_cache()
+            embedder = get_embedder(settings)
+        else:
+            embedder = None
         metrics = _build_metrics(judge, embedder, run_config)
 
         result = evaluate(
@@ -539,9 +551,23 @@ def main(
             run_config=run_config,
         )
 
+        langfuse = get_client()
+
         metric_names = [metric.name for metric in metrics]
         for row, scores in zip(rows, result.scores, strict=True):
             row["scores"] = {name: scores.get(name) for name in metric_names}
+
+            trace_id = row.get("trace_id")  # TODO: check pipeline errors
+            if not trace_id:
+                continue
+
+            for score_name, score_value in row["scores"].items():
+                langfuse.create_score(
+                    name=score_name,  # "faithfulness", "context_recall", ...
+                    value=score_value,
+                    trace_id=trace_id,
+                    comment=row.get("question"),
+                )
 
         summary = {
             name: _mean([row["scores"].get(name) for row in rows])
