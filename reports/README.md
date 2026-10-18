@@ -11,11 +11,11 @@
 
 * A langfuse trace for an answered question, end-to-end on docker compose CPU profile.
 
-    ![](../assets/Compose_CPU_Profile_Answered.png)
+    ![](../assets/Langfuce_trace_w_spans_Answered.png)
 
 * A langfuse trace for an abstained question, end-to-end on docker compose CPU profile.
 
-    ![](../assets/Compose_CPU_Profile_Abstained.png)
+    ![](../assets/Langfuce_trace_w_spans_Abstained.png)
 
 
 ## MLFlow Runs
@@ -33,6 +33,8 @@
 * RAGAS run artifacts logged for every single query with its details and evaluation metrics. 
     ![](../assets/MLFlow_RAGAS_Tracked_Artifacts.png)
 
+* RAGAS faithfulness score attached to langfuse trace
+    ![](../assets/Langfuse_trace_w_RAGAS_faithfulness_score.png)
 
 ## Lucast Testing
 * Locust tiny load testing [Here](./smoke.html)
