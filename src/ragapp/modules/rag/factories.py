@@ -16,7 +16,6 @@ from ragapp.modules.rag.domain.adapters.embedders import (
     _FakeEmbedder,
 )
 from ragapp.modules.rag.domain.adapters.generators import _FakeGenerator, _OpenAIBackend
-from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
 from ragapp.modules.rag.domain.adapters.rerankers import (
     BentoMLBGEReranker,
     _FakeReranker,
@@ -161,9 +160,9 @@ def _get_retriever_cached(
 
         return QdrantRetriever(client=client, collection_alias=collection_alias)
 
-    if backend == "bge":
-        logger.info(f"Using BgeM3Retriever over local index: {index_path}")
-        return BgeM3Retriever(index_path, rrf_k=rrf_k)
+    # if backend == "bge":
+    #     logger.info(f"Using BgeM3Retriever over local index: {index_path}")
+    #     return BgeM3Retriever(index_path, rrf_k=rrf_k)
 
     raise ValueError(
         f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant, bge"
