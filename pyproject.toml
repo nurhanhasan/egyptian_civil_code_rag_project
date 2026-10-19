@@ -24,6 +24,8 @@ dependencies = [
     "click>=8.1.0",
     "pyyaml>=6.0",
     "langfuse>=5.0.1",
+    "dvc-s3>=3.3.0",
+    "botocore[crt]>=1.43.106",
 ]
 
 [project.scripts]

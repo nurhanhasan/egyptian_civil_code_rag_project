@@ -1,6 +1,8 @@
 [core]
     analytics = false
     autostage = true
-    remote = ecc-doc-link
+    remote = ecc-dvc-data-s3
 ['remote "ecc-doc-link"']
     url = https://sadanykhalifa.com/uploads/Laws/1576751803.pdf
+['remote "ecc-dvc-data-s3"']
+    url = s3://ecc-dvc-data
