@@ -161,8 +161,6 @@ services:
         SERVER_NAME: ${SERVER_NAME:-_}
     networks:
       - appnet
-    # volumes:
-    #   - ./docker/nginx.template:/etc/nginx/templates/default.conf.template:ro
     environment:
       PORT: ${NGINX_LISTEN_PORT:-8000}
       SERVER_NAME: ${SERVER_NAME:-_}
@@ -171,6 +169,7 @@ services:
     depends_on:
       rag-api:
         condition: service_healthy
+        required: false
       rag-api-canary:
         condition: service_healthy
         required: false
@@ -181,6 +180,8 @@ services:
       retries: 5
       start_period: 5s
     restart: unless-stopped
+    profiles:
+      - compose
     deploy:
       resources:
         limits:
@@ -244,6 +245,8 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    profiles:
+      - compose
     deploy:
       resources:
         limits:
@@ -261,8 +264,6 @@ services:
       context: .
       dockerfile: docker/Dockerfile
     image: ${RAG_API_CANARY_IMAGE:-ecc/api:canary}
-    profiles:
-      - canary
     networks:
       - appnet
     env_file:
@@ -305,6 +306,8 @@ services:
       retries: 3
       start_period: 20s
     restart: unless-stopped
+    profiles:
+      - canary
     deploy:
       resources:
         limits:
@@ -312,6 +315,7 @@ services:
         reservations:
           memory: 4G
 
+  
   # ---------------------------------------------------------------- Experimental Tracking
 
   mlflow:
@@ -327,6 +331,8 @@ services:
       --port 5000
       --backend-store-uri ${MLFLOW_BACKEND_STORE_URI:-sqlite:////mlflow/mlflow.db}
       --artifacts-destination ${MLFLOW_ARTIFACT_ROOT:-/mlflow/artifacts}
+    profiles:
+      - mlflow
 
 
   # ---------------------------------------------------------------- Observability
@@ -442,6 +448,7 @@ services:
       LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EXECUTION_ROLE_ARN: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EXECUTION_ROLE_ARN:-}
       LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EGRESS_NETWORK_CONNECTOR_ARN: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_EGRESS_NETWORK_CONNECTOR_ARN:-}
       LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_REGION: ${LANGFUSE_IN_APP_AGENT_SANDBOX_AWS_LAMBDA_MICROVM_REGION:-}
+  
 
   langfuse-web:
     image: docker.langfuse.com/langfuse/langfuse:4
@@ -454,8 +461,8 @@ services:
     environment:
       <<: *langfuse-worker-env
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-mysecret} # CHANGEME
-      LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9090}
-      LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT:-http://minio:9000}
+      # LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT:-http://localhost:9090}
+      # LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT: ${LANGFUSE_S3_MEDIA_UPLOAD_INTERNAL_ENDPOINT:-http://minio:9000}
       LANGFUSE_INIT_ORG_ID: ${LANGFUSE_INIT_ORG_ID:-}
       LANGFUSE_INIT_ORG_NAME: ${LANGFUSE_INIT_ORG_NAME:-}
       LANGFUSE_INIT_PROJECT_ID: ${LANGFUSE_INIT_PROJECT_ID:-}
@@ -473,6 +480,7 @@ services:
       # In-app agent settings.
       LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_USER:-}
       LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG: ${LANGFUSE_IN_APP_AGENT_MAX_ACTIVE_RUNS_PER_ORG:-}
+
 
   clickhouse:
     image: docker.io/clickhouse/clickhouse-server:25.12
@@ -497,6 +505,7 @@ services:
       retries: 10
       start_period: 1s
 
+
   minio:
     image: cgr.dev/chainguard/minio
     networks:
@@ -520,6 +529,7 @@ services:
       retries: 5
       start_period: 1s
 
+
   redis:
     image: docker.io/redis:7
     networks:
@@ -538,6 +548,7 @@ services:
       interval: 3s
       timeout: 10s
       retries: 10
+
 
   postgres:
     image: docker.io/postgres:${POSTGRES_VERSION:-17}

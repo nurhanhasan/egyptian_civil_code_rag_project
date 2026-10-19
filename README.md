@@ -128,7 +128,7 @@ data/corpus/       source + processed corpus (DVC-tracked)
   }'
 
   # finally,
-  docker-compose --profile cpu down
+  docker-compose --profile cpu --profile mlflow --profile compose down
   ```
 
 * The API is served on <http://localhost:8000>. Interactive docs: [/docs](http://localhost:8000/docs).
