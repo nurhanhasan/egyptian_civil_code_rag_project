@@ -39,7 +39,8 @@ services:
     networks:
       - appnet
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      # - ./qdrant_storage:/qdrant/storage
+      - qdrant-data:/qdrant/storage
     ports:
       - "6333:6333"
       - "6334:6334"
@@ -195,7 +196,10 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: ${RAG_API_IMAGE:-ecc/api:dev}
+    # image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api@sha256:aeddbe869417c398dddaaf518be3b482b6f5da5941cfb5eb9357d89988bd8516}
+    image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api:latest}
+    platform: linux/amd64
+    pull_policy: build
     networks:
       - appnet
     env_file:
@@ -221,7 +225,8 @@ services:
       # observability
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
     volumes:
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+      # - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+      - hf-cache:/home/app/.cache/huggingface
     depends_on:
       redis-cache:
         condition: service_healthy
@@ -285,7 +290,7 @@ services:
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
     volumes:
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+      - hf-cache:/home/app/.cache/huggingface
     depends_on:
       redis-cache:
         condition: service_healthy
@@ -577,6 +582,7 @@ networks:
     driver: bridge
 
 volumes:
+  hf-cache:
   redis-data:
   qdrant-data:
   langfuse_postgres_data:

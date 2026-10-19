@@ -56,6 +56,11 @@ COPY --chown=app:app src/ /app/src/
 # COPY --chown=app:app ./migrations    ./migrations
 # COPY --chown=app:app alembic.ini     ./
 
+# HF cache mount point. Creating it as `app` lets Docker initialize the
+# `hf-cache` named volume with the right ownership on first use.
+RUN mkdir -p /home/app/.cache/huggingface \
+    && chown -R app:app /home/app/.cache
+
 ENV PYTHONPATH=/app/src
 
 USER app

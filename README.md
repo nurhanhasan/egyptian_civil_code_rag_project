@@ -1,18 +1,18 @@
 # Egyptian Civil Code RAG
 
 - [Egyptian Civil Code RAG](#egyptian-civil-code-rag)
-  - [How it works](#how-it-works)
-    - [Components](#components)
-    - [Models and revisions](#models-and-revisions)
-    - [Project layout](#project-layout)
   - [Quickstart](#quickstart)
     - [Run Q\&A in 3 commands](#run-qa-in-3-commands)
     - [Run without Docker (development)](#run-without-docker-development)
     - [Endpoints](#endpoints)
     - [Compose Profiles](#compose-profiles)
-  - [Quality gates](#quality-gates)
-  - [Run, Track \& Evaluate](#run-track--evaluate)
+  - [How it works](#how-it-works)
+    - [Components](#components)
+    - [Models and revisions](#models-and-revisions)
+    - [](#)
+    - [Project layout](#project-layout)
     - [Experimental tracking](#experimental-tracking)
+    - [DVC data versioning and reproducibility](#dvc-data-versioning-and-reproducibility)
     - [Evaluation](#evaluation)
     - [Load testing](#load-testing)
   - [Canary Deployment](#canary-deployment)
@@ -24,6 +24,120 @@ Egyptian Civil Code (Arabic legal Q&A) with citations. Non-commercial educationa
 use. Hallucinations are legally unacceptable here, so abstention and citations are
 safety controls.
 
+
+
+## Quickstart
+
+### Run Q&A in 3 commands
+
+  NOTE: To be able to run this locally, make sure to allocate at least 4 Cores & 16GB of memory.
+
+  NOTE: `rag-api` keeps the Hugging Face cache in the `hf-cache` named Docker volume. The first start downloads BGE-M3 (~2.2 GB); subsequent starts reuse it. `docker compose down` keeps the volume, `docker compose down -v` deletes it.
+
+  ```bash
+  # 1. Clone
+  git clone https://github.com/nurhanhasan/egyptian_civil_code_rag_project && cd egyptian_civil_code_rag_project && cp .env.example .env.dev  # edit, if needed.
+
+  # 2. Start CPU profile. For GPU, pick the `gpu` one.
+  docker compose --profile cpu --profile mlflow --profile compose up -d
+
+  # 3. Ask a question
+  curl -i -X 'POST' \
+    'http://localhost/api/v1/ask' \
+    -H 'accept: */*' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "question": "متى تسقط الدعوى المدنية بالتقادم؟"
+  }'
+
+
+  # And, for abstention
+
+  curl -i -X 'POST' \
+    'http://localhost/api/v1/ask' \
+    -H 'accept: */*' \
+    -H 'Content-Type: application/json' \
+    -d '{
+    "question": "ما عقوبة جريمة القتل"             
+  }'
+
+  # finally,
+  docker compose --profile cpu --profile mlflow --profile compose down
+  ```
+
+* The API is served on <http://localhost:8000>. Interactive docs: [/docs](http://localhost:8000/docs).
+
+* For artifacts and screenshots, please check [Here](./reports/README.md).
+
+* To build the index
+  ```bash
+  docker compose exec rag-api python -m ragapp.scripts.ingest_corpus
+  ```
+
+### Run without Docker (development)
+
+  ```bash
+  uv sync
+
+  docker compose --profile cpu --profile mlflow up                  # deps without the api
+  uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload       # OR the debugger config
+  ```
+
+On macOS, force the embedder/reranker onto CPU to avoid a Metal (MPS) assertion
+under concurrency:
+
+  ```bash
+  BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
+  ```
+
+
+### Endpoints
+
+| Method | Path | Body | Response |
+|---|---|---|---|
+| `POST` | `/api/v1/ask` | `{"question": str}` | `{"answer": str, "sources": [...]}` or an abstention `{"abstained": true, "reason": str, "answer": null, "sources": []}` |
+| `GET` | `/api/v1/health` | — | `{"status":"healthy","documents_indexed":N}` |
+
+An empty or missing `question` is rejected with `422` (Pydantic validation).
+
+
+
+### Compose Profiles
+
+
+| Profile   | Services    |
+|-----------|-------------|
+| `default` | qdrant, redis-cache, langfuse-worker, langfuse-web, clickhouse, minio, redis, postgres |
+| `cpu`     | vllm-cpu |
+| `gpu`     | vllm |
+| `compose` | rag-api, nginx |
+| `canary`  | rag-api-canary |
+| `mlflow`  | mlflow |
+
+  ```bash
+  docker compose --profile cpu up
+  docker compose --profile cpu --profile mlflow up
+  docker compose --profile cpu --profile mlflow --profile compose up --build --force-recreate
+  ```
+
+- **`--profile gpu`** — adds the private `vllm` server (`Qwen/Qwen2.5-3B-Instruct-AWQ`),
+  used instead of running vLLM locally. Needs an NVIDIA container runtime; the port
+  is never published, `rag-api` reaches it at `http://vllm:8000/v1`.
+
+- **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu` service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host with the community
+
+  ```bash
+  docker compose --profile gpu up -d
+  ```
+
+- **`--profile cpu`** — adds a CPU-only `vllm` (no GPU needed), served as the alias
+  `vllm` so `rag-api` uses the same URL. AWQ is unsupported on the ARM CPU image
+  (AWQ is x86/s390x/Power only), so it runs the unquantized
+  `Qwen/Qwen3-0.6B` 
+
+  ```bash
+  docker compose --profile cpu up -d
+  ```
 
 ## How it works
 
@@ -73,6 +187,9 @@ All are configurable through the environment (`BGE_M3_MODEL_PATH`
 `BGE_RERANKER_MODEL_PATH`, `GENERATOR_MODEL`). Pinning an immutable revision per
 model is required.
 
+
+### 
+
 ### Project layout
 
 ```text
@@ -97,137 +214,20 @@ data/corpus/       source + processed corpus (DVC-tracked)
   4. [mlops-automated-deployment](https://github.com/nurhanhasan/egyptian_civil_code_rag_project/tree/mlops-automated-deployment)
 
 
-## Quickstart
-
-### Run Q&A in 3 commands
-
-  ```bash
-  # 1. Clone
-  git clone https://github.com/nurhanhasan/egyptian_civil_code_rag_project && cd egyptian_civil_code_rag_project && cp .env.example .env.dev # edit, if needed.
-
-  # 2. Start CPU profile. For GPU, pick the `gpu` one.
-  docker-compose --profile cpu --profile mlflow --profile compose up -d
-
-  # 3. Ask a question
-  curl -i -X 'POST' \
-    'http://localhost/api/v1/ask' \
-    -H 'accept: */*' \
-    -H 'Content-Type: application/json' \
-    -d '{
-    "question": "متى تسقط الدعوى المدنية بالتقادم؟"
-  }'
-
-
-  # And, for abstention
-
-  curl -i -X 'POST' \
-    'http://localhost/api/v1/ask' \
-    -H 'accept: */*' \
-    -H 'Content-Type: application/json' \
-    -d '{
-    "question": "ما عقوبة جريمة القتل"             
-  }'
-
-  # finally,
-  docker-compose --profile cpu --profile mlflow --profile compose down
-  ```
-
-* The API is served on <http://localhost:8000>. Interactive docs: [/docs](http://localhost:8000/docs).
-
-* For artifacts and screenshots, please check [Here](./reports/README.md).
-
-* To build the index
-  ```bash
-  docker-compose exec rag-api python -m ragapp.scripts.ingest_corpus
-  ```
-
-### Run without Docker (development)
-
-  ```bash
-  uv sync
-
-  docker-compose --profile cpu --profile mlflow up                  # deps without the api
-  uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload       # OR the debugger config
-  ```
-
-On macOS, force the embedder/reranker onto CPU to avoid a Metal (MPS) assertion
-under concurrency:
-
-  ```bash
-  BGE_DEVICE=cpu uv run uvicorn ragapp.entrypoints.fastapi.main:app --reload
-  ```
-
-
-### Endpoints
-
-| Method | Path | Body | Response |
-|---|---|---|---|
-| `POST` | `/api/v1/ask` | `{"question": str}` | `{"answer": str, "sources": [...]}` or an abstention `{"abstained": true, "reason": str, "answer": null, "sources": []}` |
-| `GET` | `/api/v1/health` | — | `{"status":"healthy","documents_indexed":N}` |
-
-An empty or missing `question` is rejected with `422` (Pydantic validation).
-
-
-
-### Compose Profiles
-
-
-| Profile   | Services    |
-|-----------|-------------|
-| `default` | qdrant, redis-cache, langfuse-worker, langfuse-web, clickhouse, minio, redis, postgres |
-| `cpu`     | vllm-cpu |
-| `gpu`     | vllm |
-| `compose` | rag-api, nginx |
-| `canary`  | rag-api-canary |
-| `mlflow`  | mlflow |
-
-  ```bash
-  docker-compose --profile cpu up
-  docker-compose --profile cpu --profile mlflow up
-  docker-compose --profile cpu --profile mlflow --profile compose up --build --force-recreate
-  ```
-
-- **`--profile gpu`** — adds the private `vllm` server (`Qwen/Qwen2.5-3B-Instruct-AWQ`),
-  used instead of running vLLM locally. Needs an NVIDIA container runtime; the port
-  is never published, `rag-api` reaches it at `http://vllm:8000/v1`.
-
-- **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu` service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host with the community
-
-  ```bash
-  docker compose --profile gpu up -d
-  ```
-
-- **`--profile cpu`** — adds a CPU-only `vllm` (no GPU needed), served as the alias
-  `vllm` so `rag-api` uses the same URL. AWQ is unsupported on the ARM CPU image
-  (AWQ is x86/s390x/Power only), so it runs the unquantized
-  `Qwen/Qwen3-0.6B` 
-
-  ```bash
-  docker-compose --profile cpu up -d
-  ```
-
-
-## Quality gates
+<!-- ## Quality gates -->
 
 <!-- TODO: -->
-In progress ...
+<!-- In progress ... -->
 
 
-## Run, Track & Evaluate
-
-  ```bash
-  uv run ruff check .        # lint
-  uv run ruff format .       # format
-  # uv run pytest tests/unit -q
-  # uv run pytest tests/integration -q
-  ```
+<!-- ## Run, Track & Evaluate -->
 
 ### Experimental tracking
 
 To track experiments:
 
   ```bash
-  docker-compose up qdrant mlflow # or local
+  docker compose up qdrant mlflow # or local
   ```
 
 * To evaluate the Query Path:
@@ -237,8 +237,59 @@ To track experiments:
 
 * To evaluate the Offline Ingestion Path:
   ```bash
-  dvc pull
-  dvc repro --force
+  uv run dvc pull
+  uv run dvc repro
+  uv run python -m ragapp.scripts.ingest_corpus
+  ```
+
+### DVC data versioning and reproducibility
+
+DVC versions the corpus and the derived extraction/chunking outputs. Git only
+stores the `.dvc` pointers plus `dvc.yaml` / `dvc.lock`, so a clone can restore
+the exact same inputs and derived artifacts.
+
+| Tracked by DVC | Path |
+|---|---|
+| Source PDF | `data/corpus/Egyptian_Civil_Law.pdf` (via `Egyptian_Civil_Law.pdf.dvc`) |
+| Extracted document | `data/corpus/processed/document.json` |
+| Page text | `data/corpus/processed/pages.jsonl` |
+| Article-aware chunks | `data/corpus/processed/chunks.article_aware.jsonl` |
+| Source-to-chunk map | `data/corpus/processed/source_to_chunk.jsonl` |
+| Validation report | `data/corpus/processed/validation_report.json` |
+
+The `extract-and-chunk` stage in `dvc.yaml` is driven by `params.yaml`
+(`pdf`, `out_dir`, `strategy`) and depends on the PDF and
+`data/corpus/extract_civil_code.py`. Changing either a parameter or a
+dependency invalidates the stage. `data/corpus/processed/` is gitignored —
+never commit its contents.
+
+Two remotes are configured:
+
+```bash
+# ❯ uv run dvc remote list
+ecc-doc-link    https://sadanykhalifa.com/uploads/Laws/1576751803.pdf
+ecc-dvc-data-s3 s3://ecc-dvc-data       (default)
+```
+
+`ecc-dvc-data-s3` is the DVC cache used by `pull`/`push`. `ecc-doc-link`
+records the upstream source URL. `dvc pull` can read from the public bucket;
+`dvc push` needs AWS credentials with write access.
+
+In CI, the `rebuild-index` job in `.github/workflows/ci.yml` runs
+`dvc pull` → `dvc repro` → `dvc push`, then ingests the chunks into a
+disposable Qdrant container. It uploads `qdrant_storage/` as an artifact for
+the `build` job, which bakes it into the image. The job therefore needs both
+read and write AWS credentials for the S3 remote that's configured through 
+Envirenment Secrets.
+
+  ```bash
+  uv sync
+
+  uv run dvc pull        # restore the PDF and cached processed outputs
+  uv run dvc repro       # re-run extract-and-chunk only if deps/params changed
+  uv run dvc push        # upload new outputs to the default remote
+
+  # With Qdrant running: build an immutable collection and promote the alias
   uv run python -m ragapp.scripts.ingest_corpus
   ```
 
@@ -271,10 +322,10 @@ See report `reports/smoke.html` for performance.
 
 
 ## Canary Deployment
-* A simple canary deployment is available through the nginx along with rag-api-canary in the docker-compose file. Traffic could be split between 2 backends wuth a fallback to the stable version.
+* A simple canary deployment is available through the nginx along with rag-api-canary in the docker compose file. Traffic could be split between 2 backends wuth a fallback to the stable version.
 
   ```bahs
-  docker-compose --profile cpu --profile compose --profile canary up --build --force-recreate
+  docker compose --profile cpu --profile compose --profile canary up --build --force-recreate
   ```
 
 ## Documentation
