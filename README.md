@@ -11,6 +11,7 @@
     - [Endpoints](#endpoints)
     - [Compose Profiles](#compose-profiles)
   - [Quality gates](#quality-gates)
+  - [Run, Track \& Evaluate](#run-track--evaluate)
     - [Experimental tracking](#experimental-tracking)
     - [Evaluation](#evaluation)
     - [Load testing](#load-testing)
@@ -207,6 +208,12 @@ An empty or missing `question` is rejected with `422` (Pydantic validation).
 
 
 ## Quality gates
+
+<!-- TODO: -->
+In progress ...
+
+
+## Run, Track & Evaluate
 
   ```bash
   uv run ruff check .        # lint

@@ -229,3 +229,6 @@ data/corpus/processed/
 
 mlflow/
 mlflow.db
+
+# Adding qdrant_storage to .gitignore as it'll be built in CI
+qdrant_storage/
