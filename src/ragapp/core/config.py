@@ -128,9 +128,9 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_EXPERIMENT_NAME: str = "egyptian-civil-code-rag"
 
-    LANGFUSE_SECRET_KEY: str
-    LANGFUSE_PUBLIC_KEY: str
-    LANGFUSE_BASE_URL: str
+    LANGFUSE_SECRET_KEY: str | None = None
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_BASE_URL: str = "http://localhost:3000"
 
     # params.yaml path
     PARAMS_YAML_PATH: str = "params.yaml"
