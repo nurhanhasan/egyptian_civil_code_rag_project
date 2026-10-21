@@ -9,10 +9,10 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: api
-    # image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api@sha256:aeddbe869417c398dddaaf518be3b482b6f5da5941cfb5eb9357d89988bd8516}
+    # image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api@sha256:8264071aac7110179971ce4f886e94c0dcce1304dafd3fa15f9ab9f4596430b8}
     image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api:latest}
-    # platform: linux/amd64
-    # pull_policy: always
+    platform: linux/amd64
+    pull_policy: always
     networks:
       - appnet
     env_file:
@@ -27,8 +27,8 @@ services:
       RETRIEVER_BACKEND: qdrant
       QDRANT_PATH: /app/qdrant_storage
       GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
-      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:7080/v1}
+      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
       WORKERS: ${WORKERS:-1}
       # HF Cache configuration
       HF_HOME: /home/app/.cache/huggingface
@@ -40,8 +40,8 @@ services:
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
     volumes:
       # Used bind mount to use locally downloaded models.
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
-      # - hf-cache:/home/app/.cache/huggingface
+      # - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+      - hf-cache:/home/app/.cache/huggingface
     depends_on:
       redis-cache:
         condition: service_healthy
