@@ -55,6 +55,33 @@ def _compute_corpus_revision(corpus_path: Path) -> str:
     return hashlib.md5("".join(hashes).encode()).hexdigest()[:12]
 
 
+def _section_context(rec: dict) -> str:
+    """Build the section breadcrumb used as retrieval/rerank context.
+
+    The article body alone often lacks the wording a user asks with (e.g.
+    "بيع ملك الغير" for Article 466). The subsection heading carries it.
+    """
+    section_path = rec.get("section_path") or []
+    titles = [
+        str(item.get("title_ar") or "").strip()
+        for item in section_path
+        if isinstance(item, dict)
+    ]
+    titles = [title for title in titles if title]
+    if titles:
+        return " > ".join(titles)
+    return rec.get("section_title", {}).get(
+        "ar", rec.get("part_name", "Egyptian Civil Code")
+    )
+
+
+def _embedding_text(chunk: Chunk) -> str:
+    """Text embedded/matched: section context + normalized article text."""
+    if chunk.title and chunk.title not in chunk.norm_text:
+        return f"{chunk.title}\n{chunk.norm_text}"
+    return chunk.norm_text
+
+
 def load_chunks(path: Path) -> list[Chunk]:
     """Load and convert JSONL chunks to Chunk entities."""
     chunks = []
@@ -92,9 +119,7 @@ def load_chunks(path: Path) -> list[Chunk]:
             chunk = Chunk(
                 chunk_id=rec.get("chunk_id", str(uuid.uuid4())),
                 doc_id=rec.get("doc_id", "egyptian-civil-law-1948"),
-                title=rec.get("section_title", {}).get(
-                    "ar", rec.get("part_name", "Egyptian Civil Code")
-                ),
+                title=_section_context(rec),
                 authority="Egyptian Civil Code",
                 jurisdiction=rec.get("jurisdiction", "EG"),
                 doc_status=rec.get("doc_status", "in_force"),
@@ -121,7 +146,7 @@ async def embed_chunks(
 ) -> list[tuple[Chunk, list[float], dict[int, float]]]:
     """Embed chunks using the configured Embedder port."""
     embedder = get_embedder(settings)
-    texts = [c.norm_text for c in chunks]
+    texts = [_embedding_text(c) for c in chunks]
 
     results = []
     for i in range(0, len(texts), batch_size):
@@ -141,21 +166,24 @@ async def embed_chunks(
 
 def run_ingestion(
     settings: Settings,
-    qdrant_url: str,
+    qdrant_url: str | None = None,
     alias: str = DEFAULT_ALIAS,
     chunks_path: Path = DEFAULT_CHUNKS_PATH,
     batch_size: int = 32,
     upsert_batch: int = 100,
+    qdrant_path: Path | str | None = None,
 ) -> IngestionResult:
     """Run the full ingestion pipeline.
 
     Args:
         settings: Application settings
-        qdrant_url: Qdrant server URL
+        qdrant_url: Qdrant server URL (ignored when `qdrant_path` is set)
         alias: Stable alias name
         chunks_path: Path to chunks JSONL file
         batch_size: Embedding batch size
         upsert_batch: Upsert batch size
+        qdrant_path: Build into a Qdrant client local-mode directory instead
+            of a server. The directory must not be open by another process.
 
     Returns:
         IngestionResult with build metadata for MLflow logging
@@ -172,16 +200,21 @@ def run_ingestion(
 
     # Embed chunks
     embedded = asyncio.run(embed_chunks(chunks, settings, batch_size=batch_size))
+    dense_dim = len(embedded[0][1]) if embedded else BGE_M3_DIM
 
-    # Connect to Qdrant
-    client = QdrantClient(url=qdrant_url, timeout=60.0)
+    # Connect to Qdrant (server) or open the local-mode store (no server).
+    if qdrant_path is not None:
+        Path(qdrant_path).mkdir(parents=True, exist_ok=True)
+        client = QdrantClient(path=str(qdrant_path))
+    else:
+        client = QdrantClient(url=qdrant_url, timeout=60.0)
 
     try:
         # Create immutable build collection
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         unique_id = uuid.uuid4().hex[:8]
         build_id = f"build-{timestamp}-{unique_id}"
-        create_build_collection(client, build_id, BGE_M3_DIM)
+        create_build_collection(client, build_id, dense_dim)
 
         # Upsert points in batches
         for i in range(0, len(embedded), upsert_batch):
@@ -207,7 +240,8 @@ def run_ingestion(
             "chunks_indexed": len(chunks),
             "points_in_alias": info.points_count,
             "build_duration_ms": build_duration_ms,
-            "qdrant_url": qdrant_url,
+            "qdrant_url": None if qdrant_path is not None else qdrant_url,
+            "qdrant_path": str(qdrant_path) if qdrant_path is not None else None,
             "alias": alias,
             "embedder_model_id": settings.BGE_M3_MODEL_PATH,
             "embedder_revision_id": settings.EMBEDDER_MODEL_REVISION_ID,

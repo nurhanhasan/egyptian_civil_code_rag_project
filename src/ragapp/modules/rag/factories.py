@@ -16,6 +16,7 @@ from ragapp.modules.rag.domain.adapters.embedders import (
     _FakeEmbedder,
 )
 from ragapp.modules.rag.domain.adapters.generators import _FakeGenerator, _OpenAIBackend
+from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
 from ragapp.modules.rag.domain.adapters.rerankers import (
     BentoMLBGEReranker,
     _FakeReranker,
@@ -126,9 +127,37 @@ def reset_embedder_cache() -> None:
 
 
 @lru_cache(maxsize=1)
+def _get_qdrant_client_cached(
+    qdrant_path: str | None,
+    url: str | None,
+    timeout: int | None,
+) -> QdrantClient:
+    """Single shared client per backend mode.
+
+    QdrantLocal locks its storage directory, so the retriever and the health
+    check must share this instance rather than open the path twice.
+    """
+    if qdrant_path:
+        logger.info(f"Using Qdrant client local backend mode: path={qdrant_path}")
+        return QdrantClient(path=qdrant_path)
+    if url == ":memory:":
+        return QdrantClient(":memory:")
+    return QdrantClient(url=url, timeout=timeout)
+
+
+def get_qdrant_client(settings: Settings) -> QdrantClient:
+    return _get_qdrant_client_cached(
+        getattr(settings, "QDRANT_PATH", None),
+        settings.QDRANT_URL,
+        settings.QDRANT_TIMEOUT,
+    )
+
+
+@lru_cache(maxsize=1)
 def _get_retriever_cached(
     backend: str,
     collection_alias: str,
+    qdrant_path: str | None,
     url: str | None,
     timeout: int | None,
     index_path: str,
@@ -137,9 +166,9 @@ def _get_retriever_cached(
     """
     Build the configured Retriever.
 
-        RETRIEVER_BACKEND=qdrant -> QdrantRetriever over QDRANT_URL,
-                                    reading the stable alias
-                                    QDRANT_COLLECTION_ALIAS
+        RETRIEVER_BACKEND=qdrant -> QdrantRetriever over QDRANT_PATH for local
+                                    backend mode OR QDRANT_URL for Qdrant Server,
+                                    reading the stable alias QDRANT_COLLECTION_ALIAS
         RETRIEVER_BACKEND=bge    -> BgeM3Retriever over a precomputed local
                                     index at RETRIEVER_INDEX_PATH
 
@@ -148,21 +177,17 @@ def _get_retriever_cached(
     """
 
     logger.info(
-        f"Creating retriever: backend={backend}, url={url}, alias={collection_alias}"
+        f"Creating retriever: backend={backend}, path={qdrant_path}, "
+        f"url={url}, alias={collection_alias}"
     )
 
     if backend == "qdrant":
-        url = url
-        if url == ":memory:":
-            client = QdrantClient(":memory:")
-        else:
-            client = QdrantClient(url=url, timeout=timeout)
-
+        client = _get_qdrant_client_cached(qdrant_path, url, timeout)
         return QdrantRetriever(client=client, collection_alias=collection_alias)
 
-    # if backend == "bge":
-    #     logger.info(f"Using BgeM3Retriever over local index: {index_path}")
-    #     return BgeM3Retriever(index_path, rrf_k=rrf_k)
+    if backend == "bge":
+        logger.info(f"Using BgeM3Retriever over local index: {index_path}")
+        return BgeM3Retriever(index_path, rrf_k=rrf_k)
 
     raise ValueError(
         f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant, bge"
@@ -172,6 +197,7 @@ def _get_retriever_cached(
 def get_retriever(settings: Settings) -> Retriever:
     return _get_retriever_cached(
         backend=settings.RETRIEVER_BACKEND,
+        qdrant_path=getattr(settings, "QDRANT_PATH", None),
         url=settings.QDRANT_URL,
         collection_alias=settings.QDRANT_COLLECTION_ALIAS,
         timeout=settings.QDRANT_TIMEOUT,

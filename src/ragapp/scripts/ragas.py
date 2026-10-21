@@ -208,7 +208,7 @@ async def _collect_responses(
     async def _answer(item: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
             start = time.perf_counter()
-            response = await service.run_pipeline(item["question"])
+            response, trace_id = await service.run_pipeline(item["question"])
             latency_ms = (time.perf_counter() - start) * 1000
 
         if isinstance(response, AbstentionResponse):
@@ -229,7 +229,7 @@ async def _collect_responses(
             "latency_ms": latency_ms,
             "citation_count": citation_count,
             "rerank_top_score": rerank_top_score,
-            "trace_id": response.trace_id,
+            "trace_id": trace_id,
         }
 
     results = await asyncio.gather(

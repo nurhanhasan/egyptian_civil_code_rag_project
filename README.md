@@ -39,7 +39,7 @@ safety controls.
   git clone https://github.com/nurhanhasan/egyptian_civil_code_rag_project && cd egyptian_civil_code_rag_project && cp .env.example .env.dev  # edit, if needed.
 
   # 2. Start CPU profile. For GPU, pick the `gpu` one.
-  docker compose --profile cpu --profile mlflow --profile compose up -d
+  docker compose --profile cpu --profile compose up -d
 
   # 3. Ask a question
   curl -i -X 'POST' \
@@ -69,9 +69,10 @@ safety controls.
 
 * For artifacts and screenshots, please check [Here](./reports/README.md).
 
-* To build the index
+* To build the index and bake vector store in the docker image:
   ```bash
-  docker compose exec rag-api python -m ragapp.scripts.ingest_corpus
+  uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
+  docker compose build rag-api
   ```
 
 ### Run without Docker (development)
@@ -107,7 +108,7 @@ An empty or missing `question` is rejected with `422` (Pydantic validation).
 
 | Profile   | Services    |
 |-----------|-------------|
-| `default` | qdrant, redis-cache, langfuse-worker, langfuse-web, clickhouse, minio, redis, postgres |
+| `default` | redis-cache, langfuse-worker, langfuse-web, clickhouse, minio, redis, postgres |
 | `cpu`     | vllm-cpu |
 | `gpu`     | vllm |
 | `compose` | rag-api, nginx |
@@ -160,8 +161,9 @@ An empty or missing `question` is rejected with `422` (Pydantic validation).
 * **One public edge.** FastAPI owns `/api/v1/ask` end-to-end. BentoML does not
   expose the route, and vLLM is never the public API. In the Compose topology,
   `rag-api` (and `nginx` in the `compose` profile) is the application entrypoint;
-  Qdrant, Redis, vLLM and the Langfuse stores live on the private `appnet` network.
-  Local development still publishes dependency ports for convenience.
+  Redis, vLLM and the Langfuse stores live on the private `appnet` network.
+  Qdrant runs in-process (`QDRANT_PATH`), so there is no vector-store service
+  or port; local development still publishes dependency ports for convenience.
 
 * **Immutable builds, alias promotion.** Ingestion creates a new collection named
   by its build ID, populates it, then moves the stable alias
@@ -227,7 +229,7 @@ data/corpus/       source + processed corpus (DVC-tracked)
 To track experiments:
 
   ```bash
-  docker compose up qdrant mlflow # or local
+  docker compose --profile mlflow up # or local
   ```
 
 * To evaluate the Query Path:
@@ -276,11 +278,13 @@ records the upstream source URL. `dvc pull` can read from the public bucket;
 `dvc push` needs AWS credentials with write access.
 
 In CI, the `rebuild-index` job in `.github/workflows/ci.yml` runs
-`dvc pull` → `dvc repro` → `dvc push`, then ingests the chunks into a
-disposable Qdrant container. It uploads `qdrant_storage/` as an artifact for
-the `build` job, which bakes it into the image. The job therefore needs both
-read and write AWS credentials for the S3 remote that's configured through 
-Envirenment Secrets.
+`dvc pull` → `dvc repro` → `dvc push`, then builds the vector store with
+`ingest_corpus --qdrant-path qdrant_storage`. Qdrant client local mode writes
+it (`meta.json` + per-collection SQLite), so no Qdrant server is involved.
+The job uploads `qdrant_storage/` as an artifact; the `build` job bakes it
+into the API image at `/app/qdrant_storage`, and `QDRANT_PATH` makes the API
+serve it in-process. The job therefore needs both read and write AWS
+credentials for the S3 remote that's configured through Environment Secrets.
 
   ```bash
   uv sync
@@ -289,8 +293,11 @@ Envirenment Secrets.
   uv run dvc repro       # re-run extract-and-chunk only if deps/params changed
   uv run dvc push        # upload new outputs to the default remote
 
-  # With Qdrant running: build an immutable collection and promote the alias
-  uv run python -m ragapp.scripts.ingest_corpus
+  # Build the local-mode vector store (no server; writes qdrant_storage/)
+  uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
+
+  # Bake qdrant_storage/ into the API image (QdrantClient local mode)
+  docker compose build rag-api
   ```
 
 

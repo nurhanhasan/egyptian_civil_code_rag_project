@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Abstention thresholds (M1 #33, SPEC.md §1.2)
 MIN_RERANK_SCORE = 0.15
 MAX_CITATIONS = 5
+RETRIEVAL_TOP_K = 20
 
 
 # @bentoml.service(resources={"gpu": "1"})  # or CPU
@@ -47,10 +48,13 @@ class RAGPipelineService:
             return "No relevant context found."
 
         context_parts = []
-        for i, chunk in enumerate(chunks, 1):
+        for i, chunk in enumerate(chunks[:MAX_CITATIONS], 1):
             article = chunk.chunk.article or "unknown"
+            title = chunk.chunk.title
             raw_text = chunk.chunk.raw_text
-            context_parts.append(f"[Source {i} - Article {article}]\n{raw_text}")
+            context_parts.append(
+                f"[Source {i} - Article {article}]\n{title}\n{raw_text}"
+            )
 
         return "\n\n".join(context_parts)
 
@@ -158,7 +162,7 @@ class RAGPipelineService:
                 retrieved_chunks = await self._retriever.retrieve(
                     dense=question_embeddings.dense[0],
                     sparse=question_embeddings.sparse[0],
-                    top_k=5,
+                    top_k=RETRIEVAL_TOP_K,
                     jurisdiction="EG",
                     doc_status="in_force",
                 )

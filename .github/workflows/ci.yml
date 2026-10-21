@@ -100,36 +100,19 @@ jobs:
       - name: Push processed corpus (DVC)
         run: uv run dvc push
 
-      - name: Start Qdrant on the build volume
+      - name: Ingest corpus into the local Qdrant store
         run: |
-          # Start from a clean volume so the artifact contains only this build.
+          # QdrantLocal (no server)
           rm -rf qdrant_storage
-          mkdir -p qdrant_storage
-          docker run -d --name qdrant-index \
-            -p 6333:6333 \
-            -v "$PWD/qdrant_storage:/qdrant/storage" \
-            qdrant/qdrant@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad
-          for i in $(seq 1 30); do
-            if curl -fsS http://127.0.0.1:6333/readyz >/dev/null; then
-              exit 0
-            fi
-            sleep 2
-          done
-          docker logs qdrant-index
-          exit 1
-
-      - name: Ingest corpus into Qdrant
-        run: |
           cp .env.example .env.dev
-          uv run python -m ragapp.scripts.ingest_corpus --verify
-
-      - name: Stop Qdrant (flush WAL to disk)
-        run: docker stop qdrant-index
+          uv run python -m ragapp.scripts.ingest_corpus \
+            --qdrant-path qdrant_storage --verify
+          rm -f qdrant_storage/.lock
 
       - name: Verify index artifact
         run: |
-          test -f qdrant_storage/aliases/data.json
-          cat qdrant_storage/aliases/data.json
+          test -f qdrant_storage/meta.json
+          cat qdrant_storage/meta.json
           du -sh qdrant_storage
 
       - name: Upload Qdrant index
@@ -159,7 +142,7 @@ jobs:
           path: qdrant_storage
 
       - name: Verify index artifact
-        run: test -f qdrant_storage/aliases/data.json
+        run: test -f qdrant_storage/meta.json
 
       - uses: docker/setup-buildx-action@v3
 
@@ -168,14 +151,15 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push API image
         run: |
           docker buildx build \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
+            --cache-from type=gha,scope=api \
+            --cache-to type=gha,mode=max,scope=api \
             --build-arg WORKERS=1 \
             --push \
             -f docker/Dockerfile \
+            --target api \
             -t nurhanhasan/ecc-rag-api:sha-${GITHUB_SHA::12} \
             -t nurhanhasan/ecc-rag-api:latest \
             .
