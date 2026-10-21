@@ -16,7 +16,8 @@ from ragapp.modules.rag.domain.adapters.embedders import (
     _FakeEmbedder,
 )
 from ragapp.modules.rag.domain.adapters.generators import _FakeGenerator, _OpenAIBackend
-from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
+
+# from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
 from ragapp.modules.rag.domain.adapters.rerankers import (
     BentoMLBGEReranker,
     _FakeReranker,
@@ -140,8 +141,12 @@ def _get_qdrant_client_cached(
     if qdrant_path:
         logger.info(f"Using Qdrant client local backend mode: path={qdrant_path}")
         return QdrantClient(path=qdrant_path)
+
     if url == ":memory:":
+        logger.info("Using Qdrant client local backend mode: :memory:")
         return QdrantClient(":memory:")
+
+    logger.info(f"Using Qdrant client local backend mode: path={qdrant_path}")
     return QdrantClient(url=url, timeout=timeout)
 
 
@@ -185,9 +190,9 @@ def _get_retriever_cached(
         client = _get_qdrant_client_cached(qdrant_path, url, timeout)
         return QdrantRetriever(client=client, collection_alias=collection_alias)
 
-    if backend == "bge":
-        logger.info(f"Using BgeM3Retriever over local index: {index_path}")
-        return BgeM3Retriever(index_path, rrf_k=rrf_k)
+    # if backend == "bge":
+    #     logger.info(f"Using BgeM3Retriever over local index: {index_path}")
+    #     return BgeM3Retriever(index_path, rrf_k=rrf_k)
 
     raise ValueError(
         f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant, bge"
