@@ -25,6 +25,7 @@ __pycache__/
 data/
 docs/
 reports/
+results/
 monitoring/
 tests/
 .mypy_cache/

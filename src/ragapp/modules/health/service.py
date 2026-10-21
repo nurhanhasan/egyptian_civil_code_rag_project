@@ -1,7 +1,7 @@
 from fastapi import Depends
-from qdrant_client import QdrantClient
 
 from ragapp.core.config import get_settings
+from ragapp.modules.rag.factories import get_retriever
 
 
 class HealthCheck:
@@ -14,17 +14,14 @@ class HealthCheck:
         """
 
         documents_indexed = 0
+        client = None
         try:
-            client = QdrantClient(
-                url=self.settings.QDRANT_URL, timeout=self.settings.QDRANT_TIMEOUT
-            )
+            # TODO: Check for Retriver class and call points_count
+            client = get_retriever(self.settings)
             info = client.get_collection(self.settings.QDRANT_COLLECTION_ALIAS)
             documents_indexed = info.points_count
         except Exception:
             documents_indexed = 0
-        finally:
-            if client is not None:
-                client.close()
 
         return {"status": "healthy", "documents_indexed": documents_indexed}
 

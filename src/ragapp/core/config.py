@@ -76,8 +76,8 @@ class Settings(BaseSettings):
     GENERATOR_SYSTEM_PROMPT: str = (
         "You are a careful assistant that answers questions about the Egyptian "
         "Civil Code. Answer only from the context provided. If the context does "
-        "not contain the answer, say so explicitly instead of guessing."
-        "When the user asks in Arabic, always answer in Arabic."
+        "not contain the answer, say so explicitly instead of guessing. "
+        "When the user asks in Arabic, always answer in Arabic. "
         "Only if the user asks in English, answer in English."
     )
     OPENAI_BASE_URL: str | None = None
@@ -108,6 +108,9 @@ class Settings(BaseSettings):
     # environment tier; top_k / RRF-k belong to the params.yaml tier.
     RETRIEVER_BACKEND: str = "qdrant"
     QDRANT_URL: str = "http://localhost:6333"
+    # When set, use Qdrant client local mode (in-process engine) over this
+    # directory instead of an HTTP server.
+    QDRANT_PATH: str | None = None
     QDRANT_COLLECTION_ALIAS: str = "egyptian-civil-code"
     QDRANT_TIMEOUT: int = 5
 
@@ -128,9 +131,9 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_EXPERIMENT_NAME: str = "egyptian-civil-code-rag"
 
-    LANGFUSE_SECRET_KEY: str
-    LANGFUSE_PUBLIC_KEY: str
-    LANGFUSE_BASE_URL: str
+    LANGFUSE_SECRET_KEY: str | None = None
+    LANGFUSE_PUBLIC_KEY: str | None = None
+    LANGFUSE_BASE_URL: str = "http://localhost:3000"
 
     # params.yaml path
     PARAMS_YAML_PATH: str = "params.yaml"

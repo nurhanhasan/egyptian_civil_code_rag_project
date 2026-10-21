@@ -99,7 +99,7 @@ def ask(
         start_total = time.perf_counter()
 
         # Run the pipeline
-        response = asyncio.run(rag_service.run_pipeline(question))
+        response, trace_id = asyncio.run(rag_service.run_pipeline(question))
 
         latency_ms_total = (time.perf_counter() - start_total) * 1000
 

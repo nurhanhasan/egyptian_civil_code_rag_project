@@ -2,17 +2,19 @@
 """Full corpus ingestion pipeline for Egyptian Civil Code.
 
 Thin wrapper around ragapp.offline_ingestion.ingestion for CLI usage.
+
+    # Qdrant server
+    uv run python -m ragapp.scripts.ingest_corpus
+
+    # Qdrant client local mode (no server; this is what CI bakes into the image)
+    uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
-import sys
 from pathlib import Path
-
-# Ensure src/ is on path
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from qdrant_client import QdrantClient
 
@@ -26,10 +28,10 @@ DEFAULT_QDRANT_URL = "http://localhost:6333"
 BGE_M3_DIM = 1024
 
 
-DEFAULT_CHUNKS_PATH = Path("data/corpus/processed/chunks.article_aware.jsonl")
-DEFAULT_ALIAS = "egyptian-civil-code"
-DEFAULT_QDRANT_URL = "http://localhost:6333"
-BGE_M3_DIM = 1024
+def _open_client(qdrant_path: Path | None, qdrant_url: str) -> QdrantClient:
+    if qdrant_path is not None:
+        return QdrantClient(path=str(qdrant_path))
+    return QdrantClient(url=qdrant_url, timeout=30.0)
 
 
 def main() -> None:
@@ -42,7 +44,14 @@ def main() -> None:
         default=DEFAULT_CHUNKS_PATH,
         help="Path to chunks JSONL file",
     )
-    parser.add_argument("--qdrant-url", default=DEFAULT_QDRANT_URL, help="Qdrant URL")
+    target = parser.add_mutually_exclusive_group()
+    target.add_argument("--qdrant-url", default=None, help="Qdrant server URL")
+    target.add_argument(
+        "--qdrant-path",
+        type=Path,
+        default=None,
+        help="Build into a Qdrant client local-mode directory (no server)",
+    )
     parser.add_argument("--alias", default=DEFAULT_ALIAS, help="Stable alias name")
     parser.add_argument(
         "--batch-size", type=int, default=32, help="Embedding batch size"
@@ -57,8 +66,14 @@ def main() -> None:
 
     settings = get_settings()
 
+    qdrant_path = args.qdrant_path
+    if qdrant_path is None and not args.qdrant_url and settings.QDRANT_PATH:
+        qdrant_path = Path(settings.QDRANT_PATH)
+    qdrant_url = args.qdrant_url or settings.QDRANT_URL or DEFAULT_QDRANT_URL
+
     print("=== Egyptian Civil Code Corpus Ingestion ===")
-    print(f"Qdrant URL: {args.qdrant_url}")
+    target_label = str(qdrant_path) if qdrant_path is not None else qdrant_url
+    print(f"Qdrant: {target_label}")
     print(f"Target alias: {args.alias}")
     print(f"Chunks file: {args.chunks_path}")
 
@@ -67,7 +82,8 @@ def main() -> None:
 
     result = run_ingestion(
         settings=settings,
-        qdrant_url=args.qdrant_url,
+        qdrant_url=None if qdrant_path is not None else qdrant_url,
+        qdrant_path=qdrant_path,
         alias=args.alias,
         chunks_path=args.chunks_path,
         batch_size=args.batch_size,
@@ -82,7 +98,7 @@ def main() -> None:
 
     if args.verify:
         print("\n=== Running verification query ===")
-        client = QdrantClient(url=args.qdrant_url, timeout=30.0)
+        client = _open_client(qdrant_path, qdrant_url)
         retriever = QdrantRetriever(client, args.alias)
 
         async def test() -> None:

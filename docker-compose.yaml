@@ -2,6 +2,180 @@ name: egyptian-civil-code-rag
 
 services:
 
+  # ---------------------------------------------------------------- APIs
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    # image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api@sha256:8264071aac7110179971ce4f886e94c0dcce1304dafd3fa15f9ab9f4596430b8}
+    image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api:latest}
+    platform: linux/amd64
+    pull_policy: always
+    networks:
+      - appnet
+    env_file:
+      - .env.dev
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
+      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
+      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
+      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
+      RETRIEVER_BACKEND: qdrant
+      QDRANT_PATH: /app/qdrant_storage
+      GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:7080/v1}
+      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
+      WORKERS: ${WORKERS:-1}
+      # HF Cache configuration
+      HF_HOME: /home/app/.cache/huggingface
+      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
+      HF_CACHE_PATH: /home/app/.cache/huggingface/hub
+      # Expermental tracking & Evaluation
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      # observability
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
+    volumes:
+      # Used bind mount to use locally downloaded models.
+      # - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
+      - hf-cache:/home/app/.cache/huggingface
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+      # Optional: only present under the gpu profile. `required: false` keeps
+      # the default GPU-free stack startable without vllm.
+      vllm:
+        condition: service_healthy
+        required: false
+      # Optional: only present under the cpu profile (same alias `vllm`).
+      vllm-cpu:
+        condition: service_healthy
+        required: false
+    ports:
+      - "${RAG_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 900s
+    restart: unless-stopped
+    profiles:
+      - compose
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 4G
+
+
+  # ---------------------------------------------------------------- Canary API (for canary deployment)
+  # Deploy a separate instance for canary releases
+  # Enable with: docker compose --profile canary up -d
+  # Traffic split controlled via nginx upstream weights (default 90/10 stable/canary)
+
+  rag-api-canary:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: api
+    image: ${RAG_API_CANARY_IMAGE:-ecc/api:canary}
+    networks:
+      - appnet
+    env_file:
+      - .env.dev
+    environment:
+      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
+      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
+      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
+      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
+      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
+      RETRIEVER_BACKEND: qdrant
+      QDRANT_PATH: /app/qdrant_storage
+      GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
+      WORKERS: ${WORKERS:-1}
+      HF_HOME: /home/app/.cache/huggingface
+      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
+      HF_CACHE_PATH: /home/app/.cache/huggingface/hub
+      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
+    volumes:
+      - hf-cache:/home/app/.cache/huggingface
+    depends_on:
+      redis-cache:
+        condition: service_healthy
+      vllm:
+        condition: service_healthy
+        required: false
+      vllm-cpu:
+        condition: service_healthy
+        required: false
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+    profiles:
+      - canary
+    deploy:
+      resources:
+        limits:
+          memory: 12G
+        reservations:
+          memory: 4G
+
+
+  # ---------------------------------------------------------------- Nginx (Canary Deployment)
+
+  nginx:
+    # image: nginxinc/nginx-unprivileged:stable-alpine@sha256:4714e0b1b2577eaa1a6131d07c958b67f0eb68e6d0521e90c6e5287db8cf0bc5
+    build:
+      context: ./docker
+      dockerfile: Dockerfile-canary-nginx
+      args:
+        PORT: ${NGINX_LISTEN_PORT:-8000}
+        SERVER_NAME: ${SERVER_NAME:-_}
+    networks:
+      - appnet
+    environment:
+      PORT: ${NGINX_LISTEN_PORT:-8000}
+      SERVER_NAME: ${SERVER_NAME:-_}
+    ports:
+      - "${NGINX_PORT:-80}:8000"
+    depends_on:
+      rag-api:
+        condition: service_healthy
+        required: false
+      rag-api-canary:
+        condition: service_healthy
+        required: false
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    profiles:
+      - compose
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 32M
+
+
   # ---------------------------------------------------------------- Dependencies
 
   redis-cache:
@@ -31,25 +205,6 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-
-  # ----------------------------------------------------------------
-
-  qdrant:
-    image: ${QDRANT_IMAGE_VERSION:-qdrant/qdrant@sha256:b7b0444c4c351c970b98e90a6f89c2ee4287c65b44e52b4cb503fa5b2aa927ad}
-    networks:
-      - appnet
-    volumes:
-      - ./qdrant_storage:/qdrant/storage
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 3 bash -c '</dev/tcp/127.0.0.1/6333' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 15s
-    restart: unless-stopped
 
 
   # ---------------------------------------------------------------- Generator
@@ -149,173 +304,7 @@ services:
         reservations:
           memory: 10G
 
-  # ---------------------------------------------------------------- Nginx (Canary Deployment)
 
-  nginx:
-    # image: nginxinc/nginx-unprivileged:stable-alpine@sha256:4714e0b1b2577eaa1a6131d07c958b67f0eb68e6d0521e90c6e5287db8cf0bc5
-    build:
-      context: ./docker
-      dockerfile: Dockerfile-canary-nginx
-      args:
-        PORT: ${NGINX_LISTEN_PORT:-8000}
-        SERVER_NAME: ${SERVER_NAME:-_}
-    networks:
-      - appnet
-    environment:
-      PORT: ${NGINX_LISTEN_PORT:-8000}
-      SERVER_NAME: ${SERVER_NAME:-_}
-    ports:
-      - "${NGINX_PORT:-80}:8000"
-    depends_on:
-      rag-api:
-        condition: service_healthy
-        required: false
-      rag-api-canary:
-        condition: service_healthy
-        required: false
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8000/api/v1/health"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
-    restart: unless-stopped
-    profiles:
-      - compose
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-        reservations:
-          memory: 32M
-
-  # ---------------------------------------------------------------- APIs
-
-  rag-api:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    image: ${RAG_API_IMAGE:-ecc/api:dev}
-    networks:
-      - appnet
-    env_file:
-      - .env.dev
-    environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
-      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
-      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
-      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
-      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
-      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
-      WORKERS: ${WORKERS:-1}
-      # HF Cache configuration
-      HF_HOME: /home/app/.cache/huggingface
-      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
-      HF_CACHE_PATH: /home/app/.cache/huggingface/hub
-      # Expermental tracking & Evaluation
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
-      # observability
-      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
-    volumes:
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
-    depends_on:
-      redis-cache:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      # Optional: only present under the gpu profile. `required: false` keeps
-      # the default GPU-free stack startable without vllm.
-      vllm:
-        condition: service_healthy
-        required: false
-      # Optional: only present under the cpu profile (same alias `vllm`).
-      vllm-cpu:
-        condition: service_healthy
-        required: false
-    ports:
-      - "${RAG_PORT:-8000}:8000"
-    healthcheck:
-      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-    profiles:
-      - compose
-    deploy:
-      resources:
-        limits:
-          memory: 12G
-        reservations:
-          memory: 4G
-
-  # ---------------------------------------------------------------- Canary API (for canary deployment)
-  # Deploy a separate instance for canary releases
-  # Enable with: docker compose --profile canary up -d
-  # Traffic split controlled via nginx upstream weights (default 90/10 stable/canary)
-
-  rag-api-canary:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-    image: ${RAG_API_CANARY_IMAGE:-ecc/api:canary}
-    networks:
-      - appnet
-    env_file:
-      - .env.dev
-    environment:
-      REDIS_URL: ${REDIS_URL:-redis://redis-cache:6379/0}
-      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis-cache:6379/0}
-      CELERY_BROKER_URL: ${CELERY_BROKER_URL:-redis://redis-cache:6379/1}
-      CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
-      REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
-      CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
-      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
-      GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
-      WORKERS: ${WORKERS:-1}
-      HF_HOME: /home/app/.cache/huggingface
-      TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
-      HF_CACHE_PATH: /home/app/.cache/huggingface/hub
-      MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
-      LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
-    volumes:
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
-    depends_on:
-      redis-cache:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      vllm:
-        condition: service_healthy
-        required: false
-      vllm-cpu:
-        condition: service_healthy
-        required: false
-    expose:
-      - "8000"
-    healthcheck:
-      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health', timeout=4).read()"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-    profiles:
-      - canary
-    deploy:
-      resources:
-        limits:
-          memory: 12G
-        reservations:
-          memory: 4G
-
-  
   # ---------------------------------------------------------------- Experimental Tracking
 
   mlflow:
@@ -335,7 +324,7 @@ services:
       - mlflow
 
 
-  # ---------------------------------------------------------------- Observability
+  # ---------------------------------------------------------------- Observability (langfuse and its dependencies)
 
   langfuse-worker:
     image: docker.langfuse.com/langfuse/langfuse-worker:4
@@ -577,8 +566,8 @@ networks:
     driver: bridge
 
 volumes:
+  hf-cache:
   redis-data:
-  qdrant-data:
   langfuse_postgres_data:
     driver: local
   langfuse_clickhouse_data:

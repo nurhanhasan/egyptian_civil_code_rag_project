@@ -1,6 +1,6 @@
-# ─── FastAPI — production multi-stage image ─────────────────────
+# ─── Egyptian Civil Code — API image ───
 #
-# Build:        docker build -t ??
+# Build:        docker build -f docker/Dockerfile --target api -t ecc/api:latest .
 # Run API:      docker run --rm -p 8000:8000 --env-file .env.<env_name> ecc/api:latest
 # Run migrate:  docker run --rm --env-file .env.<env_name> ecc/api:latest alembic upgrade head
 
@@ -29,9 +29,9 @@ COPY --chown=app:app pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
-# ── Runtime stage ─────────────────────────────────────────────────────────────
+# ── Runtime stage ──────────────────────────────────────────────
 
-FROM ${PYTHON_IMAGE} AS runtime
+FROM ${PYTHON_IMAGE} AS api
 
 ARG WORKERS=1
 
@@ -51,12 +51,22 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Application source + migration tree.
 COPY --chown=app:app pyproject.toml uv.lock ./
+# Vector store produced by the CI re-index job (local in-process qdrant client).
 COPY --chown=app:app qdrant_storage/ /app/qdrant_storage/
 COPY --chown=app:app src/ /app/src/
+RUN test -f /app/qdrant_storage/meta.json \
+    || (echo "qdrant_storage/meta.json missing — build it with ingest_corpus --qdrant-path and download the CI artifact" >&2; exit 1)
 # COPY --chown=app:app ./migrations    ./migrations
 # COPY --chown=app:app alembic.ini     ./
 
-ENV PYTHONPATH=/app/src
+# HF cache mount point. Creating it as `app` lets Docker initialize the
+# `hf-cache` named volume with the right ownership on first use.
+RUN mkdir -p /home/app/.cache/huggingface \
+    && chown -R app:app /home/app/.cache
+
+# Serve the baked store through qdrant-client local mode (in-process engine).
+ENV QDRANT_PATH=/app/qdrant_storage \
+    PYTHONPATH=/app/src
 
 USER app
 

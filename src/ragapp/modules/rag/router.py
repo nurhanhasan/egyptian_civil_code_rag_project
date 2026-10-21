@@ -28,6 +28,7 @@ async def ask(
 
     Trace ID is set to the generated X-Trace-ID for logging and tracing.
     """
+
     result, trace_id = await service.run_pipeline(request.question)
 
     response.headers["X-Trace-ID"] = trace_id

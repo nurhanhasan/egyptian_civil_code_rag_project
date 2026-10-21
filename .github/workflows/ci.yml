@@ -52,13 +52,97 @@ jobs:
         continue-on-error: true
         run: uv run pytest tests/integration -q || true
 
-  build:
-    name: Build (docker)
+  rebuild-index:
+    name: Rebuild index
     runs-on: ubuntu-latest
     needs: test
     environment: dev
+    env:
+      AWS_REGION: us-east-1
+      ENVIRONMENT: dev
+      BGE_DEVICE: cpu
+      # # Override the container paths in .env.example with runner-local paths.
+      # HF_HOME: ${{ runner.temp }}/huggingface
+      # TRANSFORMERS_CACHE: ${{ runner.temp }}/huggingface/hub
+      # HF_HUB_CACHE: ${{ runner.temp }}/huggingface/hub
     steps:
       - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12.13"
+          enable-cache: true
+
+      # - name: Cache Hugging Face models
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: ${{ runner.temp }}/huggingface
+      #     key: hf-bge-m3-${{ runner.os }}-${{ hashFiles('params.yaml') }}
+      #     restore-keys: |
+      #       hf-bge-m3-${{ runner.os }}-
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      # - run: uv run aws sts get-caller-identity   # sanity check
+      - name: Pull corpus (DVC)
+        run: uv run dvc pull
+
+      - name: Extract and chunk corpus (DVC)
+        run: uv run dvc repro
+
+      - name: Push processed corpus (DVC)
+        run: uv run dvc push
+
+      - name: Ingest corpus into the local Qdrant store
+        run: |
+          # QdrantLocal (no server)
+          rm -rf qdrant_storage
+          cp .env.example .env.dev
+          uv run python -m ragapp.scripts.ingest_corpus \
+            --qdrant-path qdrant_storage --verify
+          rm -f qdrant_storage/.lock
+
+      - name: Verify index artifact
+        run: |
+          test -f qdrant_storage/meta.json
+          cat qdrant_storage/meta.json
+          du -sh qdrant_storage
+
+      - name: Upload Qdrant index
+        uses: actions/upload-artifact@v4
+        with:
+          name: qdrant-index
+          path: qdrant_storage
+          retention-days: 2
+          if-no-files-found: error
+
+  build:
+    name: Build (docker)
+    runs-on: ubuntu-latest
+    needs: [test, rebuild-index]
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+
+
+      - name: Remove checked-out index
+        run: rm -rf qdrant_storage
+
+      - name: Download Qdrant index
+        uses: actions/download-artifact@v4
+        with:
+          name: qdrant-index
+          path: qdrant_storage
+
+      - name: Verify index artifact
+        run: test -f qdrant_storage/meta.json
 
       - uses: docker/setup-buildx-action@v3
 
@@ -67,14 +151,15 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push image
+      - name: Build and push API image
         run: |
           docker buildx build \
-            --cache-from type=gha \
-            --cache-to type=gha,mode=max \
+            --cache-from type=gha,scope=api \
+            --cache-to type=gha,mode=max,scope=api \
             --build-arg WORKERS=1 \
             --push \
             -f docker/Dockerfile \
+            --target api \
             -t nurhanhasan/ecc-rag-api:sha-${GITHUB_SHA::12} \
             -t nurhanhasan/ecc-rag-api:latest \
             .
