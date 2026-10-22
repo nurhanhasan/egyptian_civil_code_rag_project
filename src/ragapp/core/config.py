@@ -110,13 +110,13 @@ class Settings(BaseSettings):
     QDRANT_URL: str = "http://localhost:6333"
     # When set, use Qdrant client local mode (in-process engine) over this
     # directory instead of an HTTP server.
-    QDRANT_PATH: str | None = None
+    QDRANT_RETRIEVER_PATH: str | None = None
     QDRANT_COLLECTION_ALIAS: str = "egyptian-civil-code"
     QDRANT_TIMEOUT: int = 5
 
     # Local (in-process) BGE-M3 retriever arm — RETRIEVER_BACKEND=bge.
-    # Reads the precomputed index built by scripts/build_local_index.py.
-    RETRIEVER_INDEX_PATH: str = "data/corpus/processed/local_index"
+    # Reads the precomputed index built by `ragapp.scripts.bge_ingest_corpus`.
+    BGE_RETRIEVER_PATH: str = "bge_storage"
     RETRIEVER_RRF_K: int = 60
 
     # Rate limiting

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Full corpus ingestion pipeline for Egyptian Civil Code.
+"""CLI for the full corpus ingestion pipeline.
 
-Thin wrapper around ragapp.offline_ingestion.ingestion for CLI usage.
+Thin wrapper around `qdrant_ingestion.run_ingestion`; all indexing logic lives
+in the module so it can be reused by CI, tests, and evaluation.
 
     # Qdrant server
-    uv run python -m ragapp.scripts.ingest_corpus
+    uv run python -m ragapp.scripts.qdrant_ingest_corpus
 
-    # Qdrant client local mode (no server; this is what CI bakes into the image)
-    uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
+    # Qdrant client local mode (no server; what CI bakes into the image)
+    uv run python -m ragapp.scripts.qdrant_ingest_corpus \
+        --qdrant-path qdrant_storage
 """
 
 from __future__ import annotations
@@ -19,8 +21,8 @@ from pathlib import Path
 from qdrant_client import QdrantClient
 
 from ragapp.core.config import get_settings
-from ragapp.modules.rag.domain.adapters.retrievers import QdrantRetriever
-from ragapp.modules.rag.offline_ingestion.ingestion import run_ingestion
+from ragapp.modules.rag.domain.adapters.qdrant_retriever import QdrantRetriever
+from ragapp.modules.rag.offline_ingestion.qdrant_ingestion import run_ingestion
 
 DEFAULT_CHUNKS_PATH = Path("data/corpus/processed/chunks.article_aware.jsonl")
 DEFAULT_ALIAS = "egyptian-civil-code"
@@ -67,8 +69,8 @@ def main() -> None:
     settings = get_settings()
 
     qdrant_path = args.qdrant_path
-    if qdrant_path is None and not args.qdrant_url and settings.QDRANT_PATH:
-        qdrant_path = Path(settings.QDRANT_PATH)
+    if qdrant_path is None and not args.qdrant_url and settings.QDRANT_RETRIEVER_PATH:
+        qdrant_path = Path(settings.QDRANT_RETRIEVER_PATH)
     qdrant_url = args.qdrant_url or settings.QDRANT_URL or DEFAULT_QDRANT_URL
 
     print("=== Egyptian Civil Code Corpus Ingestion ===")

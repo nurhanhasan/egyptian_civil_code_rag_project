@@ -38,52 +38,52 @@ Optimize        : AWQ-4bit generative model. Re-ranker distillation. RAGAS befor
 
 ### CODE & PACKAGING
 
-- [   ] src/ layout with pyproject.toml — pip install -e . works.
-- [   ] Ingestion pipeline: PDF/text → chunk → embed → vector store.
-- [   ] FastAPI /ask: {question: str} → {answer: str, sources: list[str]}
-- [   ] Pydantic rejects empty question — 422 returned and tested
-- [   ] /health returns {status: healthy, documents_indexed: N}
-- [   ] Dockerfile includes vector store and embedded documents
-- [   ] docker compose up starts service on port 8000
-- [   ] README: 3 commands to run Q&A on any machine
+- [x] src/ layout with pyproject.toml — pip install -e . works.
+- [x] Ingestion pipeline: PDF/text → chunk → embed → vector store.
+- [x] FastAPI /ask: {question: str} → {answer: str, sources: list[str]}
+- [x] Pydantic rejects empty question — 422 returned and tested
+- [x] /health returns {status: healthy, documents_indexed: N}
+- [x] Dockerfile includes vector store and embedded documents
+- [x] docker compose up starts service on port 8000
+- [x] README: 3 commands to run Q&A on any machine
 
 
 ### EXPERIMENT TRACKING & DATA VERSIONING
 
-- [   ] MLflow logs each config: chunk_size, overlap, embedding_model, faithfulness
-- [   ] ≥ 5 runs compared — MLflow screenshot in /reports/
-- [   ] Best chunking config registered in MLflow Registry
-- [   ] Document corpus tracked with DVC — dvc pull fetches all source docs
-- [   ] dvc repro re-indexes corpus reproducibly from tracked documents
-- [   ] GitHub Actions: lint → test → rebuild index → push Docker image
-- [   ] CI fails if RAGAS faithfulness < 0.75 on 20-question test set
+- [x] MLflow logs each config: chunk_size, overlap, embedding_model, faithfulness
+- [x] ≥ 5 runs compared — MLflow screenshot in /reports/
+- [ ] Best chunking config registered in MLflow Registry
+- [x] Document corpus tracked with DVC — dvc pull fetches all source docs
+- [x] dvc repro re-indexes corpus reproducibly from tracked documents
+- [x] GitHub Actions: lint → test → rebuild index → push Docker image
+- [ ] CI fails if RAGAS faithfulness < 0.75 on 20-question test set     # TODO: need a better gold set
 
 
 ### SERVING & RELEASE
 
-- [   ] BentoML wraps RAG pipeline with async /ask endpoint
-- [   ] vLLM serves the generative LLM — model name in README
-- [   ] Streaming: tokens appear progressively in curl output
-- [   ] Locust report at 50 concurrent users in /reports/
-- [   ] Batch re-indexing script tested with at least one new document. (async Celery ingestion?!)
-- [   ] Canary rollout config documented in README
+- [x] BentoML wraps RAG pipeline with async /ask endpoint
+- [x] vLLM serves the generative LLM — model name in README
+- [ ] Streaming: tokens appear progressively in curl output
+- [x] Locust report at 50 concurrent users in /reports/
+- [ ] Batch re-indexing script tested with at least one new document. (async Celery ingestion?!)
+- [x] Canary rollout config documented in README
 
 
 ### MONITORING & OBSERVABILITY
 
-- [   ] RAGAS on ≥ 50 questions — all 4 metrics logged
-- [   ] RAGAS results stored in MLflow — trend visible across trials
-- [   ] Alert: faithfulness < 0.80 → notification triggered
-- [   ] Langfuse self-hosted — every /ask creates a trace with spans
-- [   ] RAGAS faithfulness score attached to each Langfuse trace
-- [   ] Cosine similarity on query embeddings vs baseline — drift logged
-- [   ] Token usage in Prometheus — Grafana shows cost/hour
-- [   ] Guardrails PII detection active on all /ask responses
+- [x] RAGAS on ≥ 50 questions — all 4 metrics logged (14)
+- [x] RAGAS results stored in MLflow — trend visible across trials
+- [ ] Alert: faithfulness < 0.80 → notification triggered
+- [x] Langfuse self-hosted — every /ask creates a trace with spans
+- [x] RAGAS faithfulness score attached to each Langfuse trace. (Run from ragas script. In prod?!, async? maybe deferred?)
+- [ ] Cosine similarity on query embeddings vs baseline — drift logged
+- [ ] Token usage in Prometheus — Grafana shows cost/hour
+- [ ] Guardrails PII detection active on all /ask responses
 
 
-### MODEL OPTIMIZATION
+### MODEL OPTIMIZATION (Exempted)
 
-- [   ] Generative model quantized to AWQ-4bit — weights documented
-- [   ] RAGAS scores: original vs quantized — ≤ 0.03 faithfulness drop
-- [   ] Latency before vs after quantization in README
-- [   ] Final architecture diagram covering all components
+- [ ] Generative model quantized to AWQ-4bit — weights documented
+- [ ] RAGAS scores: original vs quantized — ≤ 0.03 faithfulness drop
+- [ ] Latency before vs after quantization in README
+- [x] Final architecture diagram covering all components

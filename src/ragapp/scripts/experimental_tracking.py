@@ -8,16 +8,16 @@ import time
 from pathlib import Path
 
 import click
+from ragapp.modules.rag.evaluation.mlflow_evaluator import Evaluator
 
 from ragapp.core.config import get_settings
-from ragapp.modules.rag.evaluation.mlflow_evaluator import Evaluator
 from ragapp.modules.rag.factories import (
     get_embedder,
     get_generator,
     get_reranker,
     get_retriever,
 )
-from ragapp.modules.rag.offline_ingestion.ingestion import (
+from ragapp.modules.rag.offline_ingestion.qdrant_ingestion import (
     IngestionResult,
     run_ingestion,
 )

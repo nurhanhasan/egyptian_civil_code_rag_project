@@ -11,18 +11,17 @@ from functools import lru_cache
 from qdrant_client import QdrantClient
 
 from ragapp.core.config import Settings
+from ragapp.modules.rag.domain.adapters.bge_retriever import BgeM3Retriever
 from ragapp.modules.rag.domain.adapters.embedders import (
     BentoMLBGEEmbedder,
     _FakeEmbedder,
 )
 from ragapp.modules.rag.domain.adapters.generators import _FakeGenerator, _OpenAIBackend
-
-# from ragapp.modules.rag.domain.adapters.local_retriever import BgeM3Retriever
+from ragapp.modules.rag.domain.adapters.qdrant_retriever import QdrantRetriever
 from ragapp.modules.rag.domain.adapters.rerankers import (
     BentoMLBGEReranker,
     _FakeReranker,
 )
-from ragapp.modules.rag.domain.adapters.retrievers import QdrantRetriever
 from ragapp.modules.rag.domain.ports import Embedder, Generator, Reranker, Retriever
 
 logger = logging.getLogger(__name__)
@@ -152,7 +151,7 @@ def _get_qdrant_client_cached(
 
 def get_qdrant_client(settings: Settings) -> QdrantClient:
     return _get_qdrant_client_cached(
-        getattr(settings, "QDRANT_PATH", None),
+        getattr(settings, "QDRANT_RETRIEVER_PATH", None),
         settings.QDRANT_URL,
         settings.QDRANT_TIMEOUT,
     )
@@ -171,11 +170,11 @@ def _get_retriever_cached(
     """
     Build the configured Retriever.
 
-        RETRIEVER_BACKEND=qdrant -> QdrantRetriever over QDRANT_PATH for local
+        RETRIEVER_BACKEND=qdrant -> QdrantRetriever over QDRANT_RETRIEVER_PATH for local
                                     backend mode OR QDRANT_URL for Qdrant Server,
                                     reading the stable alias QDRANT_COLLECTION_ALIAS
         RETRIEVER_BACKEND=bge    -> BgeM3Retriever over a precomputed local
-                                    index at RETRIEVER_INDEX_PATH
+                                    index at BGE_RETRIEVER_PATH
 
     QDRANT_URL=":memory:" selects Qdrant's in-process local store —
     hermetic, GPU/docker-free CI and local dev.
@@ -190,9 +189,9 @@ def _get_retriever_cached(
         client = _get_qdrant_client_cached(qdrant_path, url, timeout)
         return QdrantRetriever(client=client, collection_alias=collection_alias)
 
-    # if backend == "bge":
-    #     logger.info(f"Using BgeM3Retriever over local index: {index_path}")
-    #     return BgeM3Retriever(index_path, rrf_k=rrf_k)
+    if backend == "bge":
+        logger.info(f"Using BgeM3Retriever over local index: {index_path}")
+        return BgeM3Retriever(index_path, rrf_k=rrf_k)
 
     raise ValueError(
         f"Unsupported RETRIEVER_BACKEND={backend!r}. Expected: qdrant, bge"
@@ -202,13 +201,11 @@ def _get_retriever_cached(
 def get_retriever(settings: Settings) -> Retriever:
     return _get_retriever_cached(
         backend=settings.RETRIEVER_BACKEND,
-        qdrant_path=getattr(settings, "QDRANT_PATH", None),
+        qdrant_path=getattr(settings, "QDRANT_RETRIEVER_PATH", None),
         url=settings.QDRANT_URL,
         collection_alias=settings.QDRANT_COLLECTION_ALIAS,
         timeout=settings.QDRANT_TIMEOUT,
-        index_path=getattr(
-            settings, "RETRIEVER_INDEX_PATH", "data/corpus/processed/local_index"
-        ),
+        index_path=getattr(settings, "BGE_RETRIEVER_PATH", "bge_storage"),
         rrf_k=getattr(settings, "RETRIEVER_RRF_K", 60),
     )
 

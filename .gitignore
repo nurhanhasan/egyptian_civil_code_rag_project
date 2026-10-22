@@ -230,5 +230,7 @@ data/corpus/processed/
 mlflow/
 mlflow.db
 
-# Adding qdrant_storage to .gitignore as it'll be built in CI
+# Vector-store artifacts — both are built in CI and baked into the image.
+# qdrant_storage/ serves RETRIEVER_BACKEND=qdrant, bge_storage/ serves =bge.
 qdrant_storage/
+bge_storage/

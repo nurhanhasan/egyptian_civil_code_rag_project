@@ -238,6 +238,16 @@ class QdrantRetriever:
         vectors, `jurisdiction` + `doc_status` as required positional
         parameters so unfiltered retrieval is a type error.
 
+        Steps:
+        1. build the mandatory `jurisdiction` + `doc_status` filter;
+        2. build one dense and one sparse prefetch, both filtered and limited
+           to `top_k`;
+        3. call `query_points` with `RrfQuery`; **Qdrant** (server or the
+           in-process `QdrantLocal` engine) runs both candidate searches and
+           the RRF fusion, so no scoring happens in Python;
+        4. rebuild each `Chunk` from its payload and return ranked
+           `ScoredChunk`s.
+
         RAISES:
             ValueError: top_k < 1, an empty mandatory filter value, or both
                 vectors empty.

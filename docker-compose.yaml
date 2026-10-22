@@ -24,8 +24,12 @@ services:
       CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
       REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
       CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
-      RETRIEVER_BACKEND: qdrant
-      QDRANT_PATH: /app/qdrant_storage
+      # Stable arm: Qdrant (in-process local store, baked into the image).
+      # Override with RETRIEVER_BACKEND=bge to run both arms on one engine.
+      RETRIEVER_BACKEND: ${RETRIEVER_BACKEND:-qdrant}
+      QDRANT_RETRIEVER_PATH: /app/qdrant_storage
+      BGE_RETRIEVER_PATH: ${BGE_RETRIEVER_PATH:-/app/bge_storage}
+      RETRIEVER_RRF_K: ${RETRIEVER_RRF_K:-60}
       GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:7080/v1}
       # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
@@ -95,8 +99,13 @@ services:
       CELERY_RESULT_BACKEND_URL: ${CELERY_RESULT_BACKEND_URL:-redis://redis-cache:6379/2}
       REDIS_RATELIMIT_URL: ${REDIS_RATELIMIT_URL:-redis://redis-cache:6379/3}
       CACHE_NAMESPACE: ${CACHE_NAMESPACE:-ragapp:cache}
-      RETRIEVER_BACKEND: qdrant
-      QDRANT_PATH: /app/qdrant_storage
+      # Canary arm: the in-process BGE index. Same image as rag-api — only the
+      # retriever backend differs, so the A/B isolates the retrieval engine.
+      # Rollback: CANARY_RETRIEVER_BACKEND=qdrant docker compose up -d.
+      RETRIEVER_BACKEND: ${CANARY_RETRIEVER_BACKEND:-bge}
+      QDRANT_RETRIEVER_PATH: /app/qdrant_storage
+      BGE_RETRIEVER_PATH: ${BGE_RETRIEVER_PATH:-/app/bge_storage}
+      RETRIEVER_RRF_K: ${RETRIEVER_RRF_K:-60}
       GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
       WORKERS: ${WORKERS:-1}
@@ -209,50 +218,6 @@ services:
 
   # ---------------------------------------------------------------- Generator
 
-  # Private vLLM server. GPU profile only — never started
-  # by the default stack, and its port is never published. Enable:
-  #   docker compose --profile gpu up -d
-  # Pin the image by digest in production; VLLM_IMAGE overrides the tag.
-  vllm:
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}
-    profiles:
-      - gpu
-    networks:
-      - appnet
-    gpus: all
-    ports:
-      - "8000:8000"
-    environment:
-      HF_HOME: /root/.cache/huggingface
-      # 1 = never touch the network; use the mounted cache only.
-      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
-      VLLM_LOGGING_LEVEL: ${VLLM_LOGGING_LEVEL:-INFO}
-    volumes:
-      # Reuse the host HF cache so models are not re-downloaded.
-      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/root/.cache/huggingface/hub
-    command: >
-      ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}
-      --served-model-name ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3-0.6B}
-      --quantization awq
-      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
-      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
-      --host 0.0.0.0
-      --port 8000
-    healthcheck:
-      # vLLM exposes /health; a 7B model load takes tens of seconds, so
-      # start_period must cover the load.
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status==200 else 1)\""]
-      interval: 15s
-      timeout: 10s
-      retries: 40
-      start_period: 120s
-    restart: unless-stopped
-    # vLLM reserves GPU memory itself via --gpu-memory-utilization; it does NOT
-    # need a host RAM cap. Shared memory is required for its multiprocessing /
-    # NCCL buffers (the 64MB default is too small).
-    shm_size: 2g
-
-
   # CPU-only vLLM (no GPU). For laptops/CI without an NVIDIA runtime.
   #   docker compose --profile cpu up -d
   # AWQ kernels are GPU-only, so this serves the unquantized model. It advertises
@@ -303,6 +268,51 @@ services:
           memory: 20G
         reservations:
           memory: 10G
+
+
+
+  # Private vLLM server. GPU profile only — never started
+  # by the default stack, and its port is never published. Enable:
+  #   docker compose --profile gpu up -d
+  # Pin the image by digest in production; VLLM_IMAGE overrides the tag.
+  vllm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.31.0}
+    profiles:
+      - gpu
+    networks:
+      - appnet
+    gpus: all
+    ports:
+      - "8000:8000"
+    environment:
+      HF_HOME: /root/.cache/huggingface
+      # 1 = never touch the network; use the mounted cache only.
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+      VLLM_LOGGING_LEVEL: ${VLLM_LOGGING_LEVEL:-INFO}
+    volumes:
+      # Reuse the host HF cache so models are not re-downloaded.
+      - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/root/.cache/huggingface/hub
+    command: >
+      ${VLLM_MODEL:-Qwen/Qwen2.5-3B-Instruct-AWQ}
+      --served-model-name ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3-0.6B}
+      --quantization awq
+      --max-model-len ${VLLM_MAX_MODEL_LEN:-8192}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION:-0.90}
+      --host 0.0.0.0
+      --port 8000
+    healthcheck:
+      # vLLM exposes /health; a 7B model load takes tens of seconds, so
+      # start_period must cover the load.
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status==200 else 1)\""]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+      start_period: 120s
+    restart: unless-stopped
+    # vLLM reserves GPU memory itself via --gpu-memory-utilization; it does NOT
+    # need a host RAM cap. Shared memory is required for its multiprocessing /
+    # NCCL buffers (the 64MB default is too small).
+    shm_size: 2g
 
 
   # ---------------------------------------------------------------- Experimental Tracking

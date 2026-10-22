@@ -32,7 +32,7 @@ from ragas.run_config import RunConfig
 from ragapp.core.config import Settings, get_settings
 from ragapp.modules.rag.domain.entities import EmbeddingResult
 from ragapp.modules.rag.domain.ports import Embedder
-from ragapp.modules.rag.evaluation.mlflow_evaluator import Evaluator
+from ragapp.modules.rag.experimental_tracking.mlflow_evaluator import Evaluator
 from ragapp.modules.rag.factories import (
     get_embedder,
     get_generator,

@@ -9,7 +9,6 @@
   - [How it works](#how-it-works)
     - [Components](#components)
     - [Models and revisions](#models-and-revisions)
-    - [](#)
     - [Project layout](#project-layout)
     - [Experimental tracking](#experimental-tracking)
     - [DVC data versioning and reproducibility](#dvc-data-versioning-and-reproducibility)
@@ -32,7 +31,9 @@ safety controls.
 
   NOTE: To be able to run this locally, make sure to allocate at least 4 Cores & 16GB of memory.
 
-  NOTE: `rag-api` keeps the Hugging Face cache in the `hf-cache` named Docker volume. The first start downloads BGE-M3 (~2.2 GB); subsequent starts reuse it. `docker compose down` keeps the volume, `docker compose down -v` deletes it.
+  NOTE: `rag-api` keeps the Hugging Face cache in the `hf-cache` named Docker volume. The first start downloads BGE-M3 + the reranker (~4.5 GB, plus the CPU generator) and blocks in the startup pre-warm until they load, so `/api/v1/health` stays red for several minutes. Watch `docker compose logs -f rag-api` for `Uvicorn running` before calling the API. Do not recreate the container mid-download; `docker compose down` keeps the volume, `down -v` deletes it.
+
+  NOTE: `rag-api` is pinned to `platform: linux/amd64` and `pull_policy: always`. On Apple Silicon it runs under QEMU (slow builds and model load). For a native run, comment out both `platform` and `pull_policy` in `docker-compose.yaml`, then `docker compose build rag-api`.
 
   ```bash
   # 1. Clone
@@ -73,6 +74,10 @@ safety controls.
   ```bash
   uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
   docker compose build rag-api
+
+  # `pull_policy: always` would replace the local build on the next `up`;
+  # `--pull never` keeps the image you just built.
+  docker compose --profile cpu --profile compose up -d --pull never
   ```
 
 ### Run without Docker (development)
@@ -125,7 +130,9 @@ An empty or missing `question` is rejected with `422` (Pydantic validation).
   used instead of running vLLM locally. Needs an NVIDIA container runtime; the port
   is never published, `rag-api` reaches it at `http://vllm:8000/v1`.
 
-- **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu` service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host with the community
+- **NOTE**: Apple Silicon cannot GPU-accelerate the container: the `--profile gpu`
+  service is for NVIDIA hosts only. To use the Apple GPU, run vLLM on the host
+  with a Metal build and point `OPENAI_BASE_URL` at it.
 
   ```bash
   docker compose --profile gpu up -d
@@ -162,14 +169,15 @@ An empty or missing `question` is rejected with `422` (Pydantic validation).
   expose the route, and vLLM is never the public API. In the Compose topology,
   `rag-api` (and `nginx` in the `compose` profile) is the application entrypoint;
   Redis, vLLM and the Langfuse stores live on the private `appnet` network.
-  Qdrant runs in-process (`QDRANT_PATH`), so there is no vector-store service
+  Qdrant runs in-process (`QDRANT_RETRIEVER_PATH`), so there is no vector-store service
   or port; local development still publishes dependency ports for convenience.
 
 * **Immutable builds, alias promotion.** Ingestion creates a new collection named
   by its build ID, populates it, then moves the stable alias
   (`egyptian-civil-code`) to it. `/ask` reads only the alias. Promotion and
   rollback are alias changes — never an image rebuild or a mutation of a live
-  collection.
+  collection. In `QDRANT_RETRIEVER_PATH` (local) mode the alias lives in `meta.json`;
+  server-format storage and local-mode storage are not interchangeable.
 
 * **Traceability.** The edge assigns `X-Request-ID`; the RAG pipeline returns
   `X-Trace-ID`. The trace ID groups the Langfuse observations
@@ -190,8 +198,6 @@ All are configurable through the environment (`BGE_M3_MODEL_PATH`
 model is required.
 
 
-### 
-
 ### Project layout
 
 ```text
@@ -202,10 +208,10 @@ src/ragapp/
   modules/
     rag/           domain (ports/entities), adapters, factories, schemas, service, router
     health/        service, router
-  scripts/         evaluate.py, ingest_corpus.py, ragas.py
+  scripts/         bge_ingest_corpus.py, qdrant_ingest_corpus.py, ragas.py
 tests/
   unit/ integration/ e2e/ load/
-docs/              PDR, Architecture, ADRs, implementation plans
+docs/              PRD, Architecture, ADRs, implementation plans
 data/corpus/       source + processed corpus (DVC-tracked)
 ```
 
@@ -237,11 +243,11 @@ To track experiments:
   uv run python -m ragapp.scripts.evaluate ask "ما هو مصدر التشريع"  --tracking-uri http://localhost:5000
   ```
 
-* To evaluate the Offline Ingestion Path:
+* To evaluate the Offline Ingestion Path (local-mode store, no server):
   ```bash
   uv run dvc pull
   uv run dvc repro
-  uv run python -m ragapp.scripts.ingest_corpus
+  uv run python -m ragapp.scripts.ingest_corpus --qdrant-path qdrant_storage
   ```
 
 ### DVC data versioning and reproducibility
@@ -282,7 +288,7 @@ In CI, the `rebuild-index` job in `.github/workflows/ci.yml` runs
 `ingest_corpus --qdrant-path qdrant_storage`. Qdrant client local mode writes
 it (`meta.json` + per-collection SQLite), so no Qdrant server is involved.
 The job uploads `qdrant_storage/` as an artifact; the `build` job bakes it
-into the API image at `/app/qdrant_storage`, and `QDRANT_PATH` makes the API
+into the API image at `/app/qdrant_storage`, and `QDRANT_RETRIEVER_PATH` makes the API
 serve it in-process. The job therefore needs both read and write AWS
 credentials for the S3 remote that's configured through Environment Secrets.
 
@@ -311,6 +317,9 @@ answer plus the retrieved contexts, and scores the run in MLflow with RAGAS.
           --judge-model <CHANGEME> --with-embeddings \
               --base-url http://localhost:8000/v1  --strict
   ```
+
+  `--base-url` is the judge endpoint: use `http://localhost:7080/v1` with the
+  `cpu` profile, `http://localhost:8000/v1` with `gpu`.
 
 * Also a debugging `Ragas` configuration is added to VSCode launch.json.
 

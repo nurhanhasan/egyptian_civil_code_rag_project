@@ -46,7 +46,7 @@ src/ragapp/
           __init__.py embedders.py generators.py local_retriever.py rerankers.py retrievers.py
       evaluation/mlflow_evaluator.py
       factories.py  offline_ingestion/{__init__,ingestion,local_index}  router.py  schema.py  service.py
-  scripts/  build_local_index.py  evaluate.py  ingest_corpus.py  ragas.py  README.md
+  scripts/  bge_ingest_corpus.py  qdrant_ingest_corpus.py  ragas.py  README.md
 ```
 
 - `core/` = cache, config, context, logging, rate_limit. `dependencies/` = api_key, cache, rate_limit. `exceptions/` = domain, handlers, helpers. `middleware/` = cors, logging.
@@ -58,7 +58,7 @@ src/ragapp/
 
 1. **Single public edge: FastAPI owns `POST /api/v1/ask`**. Routers are mounted under the `/api/v1` prefix (`main.py:98`). BentoML wraps embedder + reranker with adaptive batching only. vLLM is downstream, OpenAI-compatible HTTP, never imported as a library and never published.
 2. **Exactly four ports** (`modules/rag/domain/ports.py`, all `Protocol`, all `async`): `Embedder`, `Retriever`, `Reranker`, `Generator`. Each port also declares `async close()`. A port earns its place with ≥2 implementations; current fakes + backends satisfy this. `Extractor`/`Chunker` are configured functions, NOT ports (single implementation each).
-3. **Hybrid retrieval is the default**: `Embedder` returns dense AND sparse + `revision_id`. Two `Retriever` arms now exist: Qdrant over the stable alias (default, `RETRIEVER_BACKEND=qdrant`) and local in-process BGE-M3 (`RETRIEVER_BACKEND=bge`, precomputed index via `scripts/build_local_index.py`). No dense-only path except the baseline arm.
+3. **Hybrid retrieval is the default**: `Embedder` returns dense AND sparse + `revision_id`. Two in-process `Retriever` arms now exist: Qdrant over the stable alias (default, `RETRIEVER_BACKEND=qdrant`) precompute index via `scripts/qdrant_ingest_corpus.py` into `qdrant_storage/` and BGE-M3 `RETRIEVER_BACKEND=bge`, precomputed index via `scripts/bge_ingest_corpus.py` into `bge_storage/`. No dense-only path except the baseline arm.
 4. **Retrieval is never unfiltered.** `jurisdiction` + `doc_status` filters are mandatory parameters — make unfiltered retrieval unrepresentable in the signature (type error, not runtime check). Both retriever arms apply them before scoring.
 5. **Two texts, always**: `raw_text` is the only text quoted in citations; `norm_text` is the only text embedded/matched; an offset map joins them. Arabic normalization toggles are config, logged per run.
 6. **Citations carry `effective_date` + `doc_status` + `source_checksum`.** Quote `raw_text` only. Sort by score desc, cap at 5 (`MAX_CITATIONS` in `service.py`; M0 `Citation` schema #6, M1 #32).
