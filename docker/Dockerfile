@@ -51,11 +51,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 # Application source + migration tree.
 COPY --chown=app:app pyproject.toml uv.lock ./
-# Vector store produced by the CI re-index job (local in-process qdrant client).
 COPY --chown=app:app qdrant_storage/ /app/qdrant_storage/
+COPY --chown=app:app bge_storage/ /app/bge_storage/
 COPY --chown=app:app src/ /app/src/
 RUN test -f /app/qdrant_storage/meta.json \
-    || (echo "qdrant_storage/meta.json missing — build it with ingest_corpus --qdrant-path and download the CI artifact" >&2; exit 1)
+    || (echo "qdrant_storage/meta.json missing — build it with ragapp.scripts.qdrant_ingest_corpus --qdrant-path and download the CI artifact" >&2; exit 1)
+RUN test -f /app/bge_storage/manifest.json \
+    || (echo "bge_storage/manifest.json missing — build it with ragapp.scripts.bge_ingest_corpus --out-dir bge_storage and download the CI artifact" >&2; exit 1)
 # COPY --chown=app:app ./migrations    ./migrations
 # COPY --chown=app:app alembic.ini     ./
 
@@ -64,8 +66,8 @@ RUN test -f /app/qdrant_storage/meta.json \
 RUN mkdir -p /home/app/.cache/huggingface \
     && chown -R app:app /home/app/.cache
 
-# Serve the baked store through qdrant-client local mode (in-process engine).
-ENV QDRANT_PATH=/app/qdrant_storage \
+ENV QDRANT_RETRIEVER_PATH=/app/qdrant_storage \
+    BGE_RETRIEVER_PATH=/app/bge_storage \
     PYTHONPATH=/app/src
 
 USER app

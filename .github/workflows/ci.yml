@@ -102,24 +102,42 @@ jobs:
 
       - name: Ingest corpus into the local Qdrant store
         run: |
-          # QdrantLocal (no server)
+          # QdrantLocal (no server) — serves RETRIEVER_BACKEND=qdrant
           rm -rf qdrant_storage
           cp .env.example .env.dev
-          uv run python -m ragapp.scripts.ingest_corpus \
+          uv run python -m ragapp.scripts.qdrant_ingest_corpus \
             --qdrant-path qdrant_storage --verify
           rm -f qdrant_storage/.lock
 
-      - name: Verify index artifact
+      - name: Build the BGE index
+        run: |
+          # Same chunks, same embedder, different store — serves
+          # RETRIEVER_BACKEND=bge (the canary arm). Reuses the HF cache warmed
+          # by the ingestion step above, so this is a second embedding pass,
+          # not a second model download.
+          rm -rf bge_storage
+          uv run python -m ragapp.scripts.bge_ingest_corpus \
+            --chunks-path data/corpus/processed/chunks.article_aware.jsonl \
+            --out-dir bge_storage
+
+      - name: Verify both index artifacts
         run: |
           test -f qdrant_storage/meta.json
-          cat qdrant_storage/meta.json
-          du -sh qdrant_storage
+          test -f bge_storage/manifest.json
 
       - name: Upload Qdrant index
         uses: actions/upload-artifact@v4
         with:
           name: qdrant-index
           path: qdrant_storage
+          retention-days: 2
+          if-no-files-found: error
+
+      - name: Upload BGE index
+        uses: actions/upload-artifact@v4
+        with:
+          name: bge-index
+          path: bge_storage
           retention-days: 2
           if-no-files-found: error
 
@@ -132,8 +150,8 @@ jobs:
       - uses: actions/checkout@v4
 
 
-      - name: Remove checked-out index
-        run: rm -rf qdrant_storage
+      - name: Remove checked-out indexes
+        run: rm -rf qdrant_storage bge_storage
 
       - name: Download Qdrant index
         uses: actions/download-artifact@v4
@@ -141,8 +159,17 @@ jobs:
           name: qdrant-index
           path: qdrant_storage
 
-      - name: Verify index artifact
-        run: test -f qdrant_storage/meta.json
+      - name: Download BGE index
+        uses: actions/download-artifact@v4
+        with:
+          name: bge-index
+          path: bge_storage
+
+      # Both artifacts are baked into the one image.
+      - name: Verify index artifacts
+        run: |
+          test -f qdrant_storage/meta.json
+          test -f bge_storage/manifest.json
 
       - uses: docker/setup-buildx-action@v3
 
