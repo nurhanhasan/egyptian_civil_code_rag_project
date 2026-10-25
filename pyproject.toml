@@ -58,6 +58,9 @@ dev = [
 
 [tool.ruff]
 line-length = 88
+# `src/` layout: resolve `ragapp` as first-party so isort keeps it in its own
+# section instead of sorting it with third-party imports.
+src = ["src"]
 # data/ holds one-off corpus scratch scripts, not application code.
 extend-exclude = ["data"]
 
@@ -66,6 +69,9 @@ extend-exclude = ["data"]
 # `I`: isort: import ordering
 [tool.ruff.lint]
 select = ["E", "F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["ragapp"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

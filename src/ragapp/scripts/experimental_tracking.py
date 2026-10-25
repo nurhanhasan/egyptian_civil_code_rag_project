@@ -8,9 +8,9 @@ import time
 from pathlib import Path
 
 import click
-from ragapp.modules.rag.evaluation.mlflow_evaluator import Evaluator
 
 from ragapp.core.config import get_settings
+from ragapp.modules.rag.experimental_tracking.mlflow_evaluator import Evaluator
 from ragapp.modules.rag.factories import (
     get_embedder,
     get_generator,
