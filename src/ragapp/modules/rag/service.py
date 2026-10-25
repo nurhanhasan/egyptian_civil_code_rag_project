@@ -12,12 +12,17 @@ from ragapp.modules.rag.schema import AbstentionResponse, AskResponse, Citation
 logger = logging.getLogger(__name__)
 
 # Abstention thresholds (M1 #33, SPEC.md §1.2)
-MIN_RERANK_SCORE = 0.15
-MAX_CITATIONS = 5
+# Probability that the top reranked chunk answers the question, as reported by
+# the reranker: sigmoid(cross-encoder logit), free of the section-heading bonus.
+# Threshold and measurement therefore share one unit.
+MIN_RERANK_CONFIDENCE = 0.5
 RETRIEVAL_TOP_K = 20
+# Every retrieved/reranked chunk is quoted to the generator, and every one of
+# them is cited back (PRD: `sources: list[str]` sets no count). Derived by
+# reference rather than a second literal so the two can never drift apart.
+MAX_CITATIONS = RETRIEVAL_TOP_K
 
 
-# @bentoml.service(resources={"gpu": "1"})  # or CPU
 class RAGPipelineService:
     """RAG Pipeline Service
 
@@ -43,12 +48,19 @@ class RAGPipelineService:
         self._system_prompt = system_prompt
 
     def _build_context(self, chunks: list[ScoredChunk]) -> str:
-        """Build context string from retrieved chunks for the prompt."""
+        """Build the prompt context from every reranked chunk.
+
+        Policy: the generator reads the whole reranked candidate set and the
+        caller gets all of it back as `sources` (PRD: `sources: list[str]` sets
+        no count). Slicing the context at the citation count used to drop
+        candidates that retrieval had already ranked into the answer's
+        doctrinal neighbourhood.
+        """
         if not chunks:
             return "No relevant context found."
 
         context_parts = []
-        for i, chunk in enumerate(chunks[:MAX_CITATIONS], 1):
+        for i, chunk in enumerate(chunks, 1):
             article = chunk.chunk.article or "unknown"
             title = chunk.chunk.title
             raw_text = chunk.chunk.raw_text
@@ -103,17 +115,23 @@ class RAGPipelineService:
         if not reranked:
             return True, "no_relevant_documents"
 
-        # 2. Top reranked chunk score below threshold
-        if reranked[0].score < MIN_RERANK_SCORE:
-            return True, f"low_confidence_score_{reranked[0].score:.3f}"
+        # 2. Top reranked chunk's confidence below threshold
+        top = reranked[0]
+        if top.confidence is None:
+            # A pipeline that reranks always reports confidence; a None here
+            # means a stub or a misconfigured reranker, so do not invent a gate.
+            logger.warning("reranker reported no confidence; skipping the gate")
+        elif top.confidence < MIN_RERANK_CONFIDENCE:
+            return True, f"low_confidence_{top.confidence:.3f}"
 
         # 3. Generator returns empty/refusal
         if not answer or answer.strip() == "":
             return True, "empty_generation"
 
         # 4. Citation resolution fails (staleness guards) - checked in _build_citations
-        #    If any citation missing required fields, abstain
-        for chunk in reranked[:MAX_CITATIONS]:
+        #    If any quoted chunk is missing required fields, abstain. The prompt
+        #    quotes every reranked chunk, so the guard covers every reranked chunk.
+        for chunk in reranked:
             if not chunk.chunk.source_checksum:
                 return True, "missing_source_checksum"
             if not chunk.chunk.doc_status:
@@ -137,7 +155,19 @@ class RAGPipelineService:
 
         Returns structured response with citations or abstention.
         """
+        response, trace_id, _ = await self.run_pipeline_with_context(question)
+        return response, trace_id
 
+    async def run_pipeline_with_context(
+        self, question: str
+    ) -> tuple[AskResponse | AbstentionResponse, str, list[ScoredChunk]]:
+        """Answer `question`, also returning the reranked chunks the model saw.
+
+        Evaluation needs the exact contexts and rerank scores behind an answer;
+        the API contract (`sources: list[str]`) deliberately drops both. Callers
+        that only need the answer use `run_pipeline`. The chunks come from the
+        same execution as the response, so there is nothing to reconstruct.
+        """
         # TODO: Initialize once at startup
         try:
             langfuse_client = get_client()
@@ -178,7 +208,11 @@ class RAGPipelineService:
 
             # Check abstention before generation
             if not reranked or not reranked[0].chunk:
-                return AbstentionResponse(reason="no_relevant_documents"), span.trace_id
+                return (
+                    AbstentionResponse(reason="no_relevant_documents"),
+                    span.trace_id,
+                    reranked,
+                )
 
             with span.start_as_current_observation(
                 name="generate", as_type="generation", input=reranked
@@ -198,7 +232,11 @@ class RAGPipelineService:
                 # Post-generation abstention checks
                 should_abstain, reason = self._check_abstention(reranked, answer)
                 if should_abstain:
-                    return AbstentionResponse(reason=reason), span.trace_id
+                    return (
+                        AbstentionResponse(reason=reason or "unspecified"),
+                        span.trace_id,
+                        reranked,
+                    )
 
                 # Build citations from reranked chunks
                 citations = self._build_citations(reranked)
@@ -208,11 +246,14 @@ class RAGPipelineService:
 
             langfuse_client.flush()
 
-        return AskResponse(
-            answer=answer,
-            sources=[citation.article for citation in citations],
-            trace_id=span.trace_id,
-        ), span.trace_id
+        return (
+            AskResponse(
+                answer=answer,
+                sources=[citation.article for citation in citations],
+            ),
+            span.trace_id,
+            reranked,
+        )
 
     async def close(self) -> None:
         await self._generator.close()

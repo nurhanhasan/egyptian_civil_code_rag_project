@@ -9,10 +9,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: api
-    # image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api@sha256:8264071aac7110179971ce4f886e94c0dcce1304dafd3fa15f9ab9f4596430b8}
     image: ${RAG_API_IMAGE:-docker.io/nurhanhasan/ecc-rag-api:latest}
-    platform: linux/amd64
     pull_policy: always
+    platform: linux/amd64
     networks:
       - appnet
     env_file:
@@ -87,7 +86,9 @@ services:
       context: .
       dockerfile: docker/Dockerfile
       target: api
-    image: ${RAG_API_CANARY_IMAGE:-ecc/api:canary}
+    image: ${RAG_API_CANARY_IMAGE:-docker.io/nurhanhasan/ecc-rag-api:latest}
+    pull_policy: always
+    platform: linux/amd64
     networks:
       - appnet
     env_file:
@@ -102,26 +103,35 @@ services:
       # Canary arm: the in-process BGE index. Same image as rag-api — only the
       # retriever backend differs, so the A/B isolates the retrieval engine.
       # Rollback: CANARY_RETRIEVER_BACKEND=qdrant docker compose up -d.
-      RETRIEVER_BACKEND: ${CANARY_RETRIEVER_BACKEND:-bge}
+      RETRIEVER_BACKEND: ${RETRIEVER_BACKEND:-bge}
       QDRANT_RETRIEVER_PATH: /app/qdrant_storage
       BGE_RETRIEVER_PATH: ${BGE_RETRIEVER_PATH:-/app/bge_storage}
       RETRIEVER_RRF_K: ${RETRIEVER_RRF_K:-60}
       GENERATOR_BACKEND: ${GENERATOR_BACKEND:-openai}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:8000/v1}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://vllm:7080/v1}
+      # OPENAI_BASE_URL: ${OPENAI_BASE_URL:-http://host.docker.internal:7080/v1}
       WORKERS: ${WORKERS:-1}
+      # HF Cache configuration
       HF_HOME: /home/app/.cache/huggingface
       TRANSFORMERS_CACHE: /home/app/.cache/huggingface/hub
       HF_CACHE_PATH: /home/app/.cache/huggingface/hub
+      # Expermental tracking & Evaluation
       MLFLOW_TRACKING_URI: ${MLFLOW_TRACKING_URI:-http://mlflow:5000}
+      # observability
       LANGFUSE_BASE_URL: ${LANGFUSE_BASE_URL:-http://langfuse-web:3000}
     volumes:
+      # Used bind mount to use locally downloaded models.
+      # - ${HF_HUB_DIR:-$HOME/.cache/huggingface/hub}:/home/app/.cache/huggingface/hub
       - hf-cache:/home/app/.cache/huggingface
     depends_on:
       redis-cache:
         condition: service_healthy
+      # Optional: only present under the gpu profile. `required: false` keeps
+      # the default GPU-free stack startable without vllm.
       vllm:
         condition: service_healthy
         required: false
+      # Optional: only present under the cpu profile (same alias `vllm`).
       vllm-cpu:
         condition: service_healthy
         required: false
@@ -132,7 +142,7 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 20s
+      start_period: 900s
     restart: unless-stopped
     profiles:
       - canary
@@ -154,6 +164,7 @@ services:
       args:
         PORT: ${NGINX_LISTEN_PORT:-8000}
         SERVER_NAME: ${SERVER_NAME:-_}
+    image: ${Nginx_IMAGE:-egyptian-civil-code-rag-nginx:latest}
     networks:
       - appnet
     environment:

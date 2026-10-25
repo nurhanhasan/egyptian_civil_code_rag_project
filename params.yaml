@@ -38,3 +38,4 @@ allow_errors: false
 # Qdrant (for optional index stage - set via env in CI)
 QDRANT_URL: "http://localhost:6333"
 QDRANT_COLLECTION_ALIAS: "egyptian-civil-code"
+

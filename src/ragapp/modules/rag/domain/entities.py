@@ -39,8 +39,16 @@ class Chunk:
 
 @dataclass(frozen=True, slots=True)
 class ScoredChunk:
-    """Retriever/Reranker output — chunk with score."""
+    """Retriever/Reranker output — chunk with score.
+
+    `score` orders the candidates for the stage that produced them (dense,
+    sparse, RRF, or cross-encoder logit plus heading bonus). `confidence` is a
+    probability in (0, 1) that only a cross-encoder can supply; the abstention
+    gate reads it, never `score`, because a boosted logit is not comparable to a
+    probability threshold.
+    """
 
     chunk: Chunk
     score: float  # Retrieval score (dense/sparse/RRF) or rerank score
     rank: int  # 0-based rank after this stage
+    confidence: float | None = None  # Cross-encoder P(relevant); None before rerank

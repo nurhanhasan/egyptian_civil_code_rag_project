@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     MLFLOW_TRACKING_URI: str | None = None
     MLFLOW_EXPERIMENT_NAME: str = "egyptian-civil-code-rag"
 
+    # RAGAS
+    JUDGE_BASE_LLM: str
+    JUDGE_MODEL: str
+
+    # Langfuse
     LANGFUSE_SECRET_KEY: str | None = None
     LANGFUSE_PUBLIC_KEY: str | None = None
     LANGFUSE_BASE_URL: str = "http://localhost:3000"

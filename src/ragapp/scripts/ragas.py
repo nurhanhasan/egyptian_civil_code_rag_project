@@ -6,7 +6,7 @@ answer plus the retrieved contexts, and scores the run with RAGAS.
 Usage:
     uv run python -m ragapp.scripts.ragas --gold data/gold/gold_set.json \
         --judge-model qwen3.8-27b-8bit --with-embeddings \
-            --base-url http://localhost:8000/v1  --strict
+            --judge-base-url http://localhost:8000/v1  --strict
 """
 
 from __future__ import annotations
@@ -40,8 +40,13 @@ from ragapp.modules.rag.factories import (
     get_retriever,
     reset_embedder_cache,
 )
-from ragapp.modules.rag.schema import AbstentionResponse
 from ragapp.modules.rag.service import RAGPipelineService
+from ragapp.scripts.eval_rows import (
+    attach_scores,
+    error_row,
+    extract_eval_row,
+    is_scorable,
+)
 
 # `evaluate()` only accepts legacy `Metric` objects (imported lazily below);
 # the relocated `ragas.metrics.collections` classes are incompatible with it.
@@ -142,8 +147,6 @@ def _build_rag_service(settings: Settings) -> RAGPipelineService:
 
 def _build_judge(
     settings: Settings,
-    model: str | None,
-    base_url: str | None,
     no_think: bool,
 ) -> Any:
     """Legacy RAGAS judge bound to the OpenAI-compatible vLLM endpoint.
@@ -158,8 +161,8 @@ def _build_judge(
 
     # TODO: Replace
     chat = ChatOpenAI(
-        model=model or settings.GENERATOR_MODEL,
-        base_url=base_url or settings.OPENAI_BASE_URL,
+        model=settings.JUDGE_MODEL or "",
+        base_url=settings.JUDGE_BASE_LLM or "",
         api_key=settings.OPENAI_API_KEY or "EMPTY",
         temperature=0.0,
         extra_body=extra_body,
@@ -208,51 +211,25 @@ async def _collect_responses(
     async def _answer(item: dict[str, Any]) -> dict[str, Any]:
         async with semaphore:
             start = time.perf_counter()
-            response, trace_id = await service.run_pipeline(item["question"])
+            # `sources` is `list[str]` by contract, so contexts and rerank
+            # scores come from the chunks the pipeline actually quoted.
+            response, trace_id, reranked = await service.run_pipeline_with_context(
+                item["question"]
+            )
             latency_ms = (time.perf_counter() - start) * 1000
 
-        if isinstance(response, AbstentionResponse):
-            answer, contexts, abstained = "", [], True
-            citation_count, rerank_top_score = 0, 0.0
-        else:
-            answer = response.answer
-            contexts = [citation.raw_text for citation in response.sources]
-            abstained = False
-            citation_count = len(response.sources)
-            rerank_top_score = response.sources[0].score if response.sources else 0.0
-
-        return {
-            **item,
-            "answer": answer,
-            "contexts": contexts,
-            "abstained": abstained,
-            "latency_ms": latency_ms,
-            "citation_count": citation_count,
-            "rerank_top_score": rerank_top_score,
-            "trace_id": trace_id,
-        }
+        return extract_eval_row(
+            item, response, reranked, latency_ms=latency_ms, trace_id=trace_id
+        )
 
     results = await asyncio.gather(
         *(_answer(item) for item in gold), return_exceptions=True
     )
 
-    rows: list[dict[str, Any]] = []
-    for item, result in zip(gold, results, strict=True):
-        if isinstance(result, BaseException):
-            rows.append(
-                {
-                    **item,
-                    "answer": "",
-                    "contexts": [],
-                    "abstained": True,
-                    "latency_ms": None,
-                    "citation_count": 0,
-                    "rerank_top_score": 0.0,
-                    "error": f"{type(result).__name__}: {result}",
-                }
-            )
-        else:
-            rows.append(result)
+    rows: list[dict[str, Any]] = [
+        error_row(item, result) if isinstance(result, BaseException) else result
+        for item, result in zip(gold, results, strict=True)
+    ]
 
     await service.close()
     return rows
@@ -321,13 +298,15 @@ def _build_mlflow_metrics(
     *,
     abstentions: int,
     errors: int,
+    scored_total: int,
 ) -> dict[str, float]:
     """Aggregate metric means plus per-metric parse-failure rates.
 
-    Requires the parse-failure rate to be reported alongside every
-    score, since RAGAS silently drops unparseable items.
+    Requires the parse-failure rate to be reported alongside every score, since
+    RAGAS silently drops unparseable items. The rate is computed over the rows
+    submitted for scoring, not over every gold item: abstentions and crashes
+    were never going to produce a score and must not look like judge failures.
     """
-    total = len(rows)
     metrics: dict[str, float] = {}
     for name in metric_names:
         value = summary.get(name)
@@ -340,12 +319,13 @@ def _build_mlflow_metrics(
         )
         metrics[f"{name}_n_valid"] = float(valid)
         metrics[f"{name}_parse_failure_rate"] = (
-            (total - valid) / total if total else 0.0
+            (scored_total - valid) / scored_total if scored_total else 0.0
         )
     metrics.update(
         {
-            "items": float(total),
-            "answered": float(total - abstentions),
+            "items": float(len(rows)),
+            "scored_items": float(scored_total),
+            "answered": float(len(rows) - abstentions - errors),
             "abstentions": float(abstentions),
             "errors": float(errors),
         }
@@ -402,13 +382,13 @@ def _build_mlflow_metrics(
     "--judge-model",
     type=str,
     default=None,
-    help="Judge LLM model (defaults to GENERATOR_MODEL).",
+    help="Judge LLM model (defaults to JUDGE_MODEL).",
 )
 @click.option(
-    "--base-url",
+    "--judge-base-url",
     type=str,
     default=None,
-    help="Override OPENAI_BASE_URL for the judge LLM.",
+    help="Override JUDGE_BASE_URL for the judge LLM.",
 )
 @click.option(
     "--no-think/--think",
@@ -459,7 +439,7 @@ def main(
     metric_timeout: int,
     judge_concurrency: int,
     judge_model: str | None,
-    base_url: str | None,
+    judge_base_url: str | None,
     no_think: bool,
     strict: bool,
     with_embeddings: bool,
@@ -473,7 +453,8 @@ def main(
     parse-failure rates, and the per-item JSON as an artifact.
     """
     settings = get_settings()
-    judge_name = judge_model or settings.GENERATOR_MODEL
+    judge_name = judge_model or settings.JUDGE_MODEL
+    judge_base_url = judge_base_url or settings.JUDGE_BASE_LLM
 
     params = _build_run_params(
         settings,
@@ -508,12 +489,29 @@ def main(
         service = _build_rag_service(settings)
         rows = asyncio.run(_collect_responses(service, gold, concurrency))
 
-        abstentions = sum(row["abstained"] for row in rows)
-        errors = sum("error" in row for row in rows)
-        answered = len(rows) - abstentions
-        click.echo(f"Pipeline answered {answered}/{len(rows)} (rest abstained)")
-        if errors:
-            click.echo(f"Pipeline errors: {errors}")
+        abstentions = sum(1 for row in rows if row["abstained"])
+        errors = sum(1 for row in rows if row["error"])
+        answered = len(rows) - abstentions - errors
+        click.echo(
+            f"Pipeline answered {answered}/{len(rows)} "
+            f"(abstained {abstentions}, errored {errors})"
+        )
+        for row in rows:
+            if row["error"]:
+                click.echo(f"  error {row['id']}: {row['error']}")
+
+        # Score answers only: a refusal has no answer to be faithful to, and
+        # averaging one in as 0.0 reports a policy as a grounding defect.
+        scorable = [row for row in rows if is_scorable(row)]
+        if not scorable:
+            raise click.ClickException(
+                f"Nothing to score: {abstentions} abstention(s), {errors} error(s). "
+                "Fix the pipeline before trusting any metric."
+            )
+        click.echo(
+            f"Scoring {len(scorable)}/{len(rows)} rows; "
+            f"{sum(len(row['contexts']) for row in scorable)} contexts total"
+        )
 
         dataset = EvaluationDataset(
             samples=[
@@ -523,7 +521,7 @@ def main(
                     response=row["answer"],
                     reference=row["reference"],
                 )
-                for row in rows
+                for row in scorable
             ]
         )
 
@@ -531,7 +529,7 @@ def main(
             timeout=metric_timeout,
             max_workers=judge_concurrency,
         )
-        judge = _build_judge(settings, judge_model, base_url, no_think)
+        judge = _build_judge(settings, no_think)
 
         if with_embeddings:
             # _collect_responses() closed the cached singleton embedder; evict it
@@ -554,14 +552,16 @@ def main(
         langfuse = get_client()
 
         metric_names = [metric.name for metric in metrics]
-        for row, scores in zip(rows, result.scores, strict=True):
-            row["scores"] = {name: scores.get(name) for name in metric_names}
+        attach_scores(rows, scorable, list(result.scores), metric_names)
 
-            trace_id = row.get("trace_id")  # TODO: check pipeline errors
+        for row in rows:
+            trace_id = row.get("trace_id")
             if not trace_id:
                 continue
 
             for score_name, score_value in row["scores"].items():
+                if score_value is None:
+                    continue
                 langfuse.create_score(
                     name=score_name,  # "faithfulness", "context_recall", ...
                     value=score_value,
@@ -580,6 +580,7 @@ def main(
             summary,
             abstentions=abstentions,
             errors=errors,
+            scored_total=len(scorable),
         )
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -597,6 +598,7 @@ def main(
                             "strict": strict,
                             "with_embeddings": with_embeddings,
                             "items": len(rows),
+                            "scored_items": len(scorable),
                             "abstentions": abstentions,
                             "errors": errors,
                         },

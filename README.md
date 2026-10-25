@@ -338,11 +338,14 @@ See report `reports/smoke.html` for performance.
 
 
 ## Canary Deployment
-* A simple canary deployment is available through the nginx along with rag-api-canary in the docker compose file. Traffic could be split between 2 backends wuth a fallback to the stable version.
+* A simple canary deployment is available through the nginx along with rag-api-canary in the docker compose file. Traffic is split between 2 backends with different retrievers (Qdrant vs BGE), with a fallback to the stable version.
 
   ```bahs
-  docker compose --profile cpu --profile compose --profile canary up --build --force-recreate
+  docker compose --profile cpu --profile compose --profile canary up
   ```
+
+  ![](./assets/Compose_CPU_Profile_Canary.png)
+
 
 ## Documentation
 
