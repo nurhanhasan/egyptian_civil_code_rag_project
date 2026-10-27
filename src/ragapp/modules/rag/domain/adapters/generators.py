@@ -38,6 +38,19 @@ def strip_reasoning(text: str) -> str:
     return text.strip()
 
 
+def _upstream_detail(exc: Exception) -> str:
+    """Exception text plus the upstream response body when one is present."""
+    detail = f"{type(exc).__name__}: {exc}"
+    response = getattr(exc, "response", None)
+    if response is None:
+        return detail
+    try:
+        body = str(getattr(response, "text", "") or "")[:2000]
+    except Exception:
+        body = ""
+    return f"{detail} | body={body}" if body else detail
+
+
 class _FakeGenerator:
     """Deterministic, offline generator for tests and GPU-free environments."""
 
@@ -95,7 +108,8 @@ class _OpenAIBackend:
             resp = await self._client.chat.completions.create(**kwargs)
         except Exception as e:
             logger.warning(
-                "generator_upstream_error",
+                "generator_upstream_error: %s",
+                _upstream_detail(e),
                 extra={
                     "http": {"status": 502},
                     "model": self._model,

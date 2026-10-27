@@ -244,6 +244,8 @@ services:
           - vllm
     ports:
       - "7080:7080"
+    env_file:
+      - .env.dev
     environment:
       HF_HOME: /root/.cache/huggingface
       # 1 = never touch the network; use the mounted cache only.
@@ -257,7 +259,7 @@ services:
     command: >
       ${VLLM_CPU_MODEL:-Qwen/Qwen3-0.6B}
       --served-model-name ${VLLM_SERVED_MODEL_NAME:-Qwen/Qwen3-0.6B}
-      --max-model-len ${VLLM_CPU_MAX_MODEL_LEN:-4096}
+      --max-model-len ${VLLM_CPU_MAX_MODEL_LEN:-8192}
       --enforce-eager
       --enable-prefix-caching
       --host 0.0.0.0
@@ -295,6 +297,8 @@ services:
     gpus: all
     ports:
       - "8000:8000"
+    env_file:
+      - .env.dev
     environment:
       HF_HOME: /root/.cache/huggingface
       # 1 = never touch the network; use the mounted cache only.
